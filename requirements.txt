@@ -1,4 +1,7 @@
 astropy
+dask
+dustmaps
+healpy
 hipscat-import
 numpy
 pandas
