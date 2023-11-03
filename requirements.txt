@@ -2,6 +2,6 @@ astropy
 dask
 dustmaps
 healpy
-hipscat-import
+hipscat-import @ git+https://github.com/astronomy-commons/hipscat-import@issue/46/hipscat_index
 numpy
 pandas
