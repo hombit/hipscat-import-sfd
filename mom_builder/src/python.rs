@@ -48,9 +48,7 @@ where
                 .expect("Cannot consume RwLock to get tree norder-storage")
                 .into_tuple();
             (
-                indexes
-                    .into_iter()
-                    .collect::<NdArray<_>>(),
+                indexes.into_iter().collect::<NdArray<_>>(),
                 values.into_iter().map(|x| x.into()).collect::<NdArray<_>>(),
             )
         })
