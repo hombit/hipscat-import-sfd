@@ -16,12 +16,17 @@ where
     Validator: StateIsValid<State = S>,
     S: Copy + std::fmt::Debug,
 {
-    fn build(&mut self, max_norder_states: impl IntoIterator<Item = S>) {
+    fn build<E>(
+        &mut self,
+        max_norder_states: impl IntoIterator<Item = Result<S, E>>,
+    ) -> Result<(), E> {
         let mut state_it = max_norder_states.into_iter();
 
         let parent_order_n_tiles = self.config.max_norder_n_tile() / self.config.n_children();
         for parent_index in 0..parent_order_n_tiles {
-            let states: Vec<_> = (&mut state_it).take(self.config.n_children()).collect();
+            let states = (&mut state_it)
+                .take(self.config.n_children())
+                .collect::<Result<Vec<_>, E>>()?;
             assert_eq!(states.len(), self.config.n_children());
 
             // Run recursive merge
@@ -42,6 +47,8 @@ where
                 }
             }
         }
+
+        Ok(())
     }
 
     fn merge_states(&mut self, states: &[S], parent_index: usize, parent_norder: usize) -> bool {
@@ -103,11 +110,11 @@ where
     }
 }
 
-pub(crate) fn build_tree<S, Merger, Validator>(
+pub(crate) fn build_tree<S, Merger, Validator, E>(
     state_builder: &StateBuilder<Merger, Validator>,
     tree_config: &TreeConfig,
-    max_norder_states: impl IntoIterator<Item = S>,
-) -> Tree<S>
+    max_norder_states: impl IntoIterator<Item = Result<S, E>>,
+) -> Result<Tree<S>, E>
 where
     Merger: MergeStates<State = S>,
     Validator: StateIsValid<State = S>,
@@ -120,6 +127,6 @@ where
             .map(|_| RwLock::new(NorderTiles::new()))
             .collect(),
     };
-    tree_builder.build(max_norder_states);
-    tree_builder.tree
+    tree_builder.build(max_norder_states)?;
+    Ok(tree_builder.tree)
 }

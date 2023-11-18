@@ -22,7 +22,7 @@ impl<T> MinMaxMeanState<T>
 where
     T: Copy,
 {
-    fn new(value: T) -> Self {
+    pub(crate) fn new(value: T) -> Self {
         Self {
             min: value,
             max: value,

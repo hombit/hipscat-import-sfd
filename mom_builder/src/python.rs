@@ -1,8 +1,10 @@
 use crate::build_tree::build_tree;
 use crate::state::MinMaxMeanState;
 use crate::state::{MinMaxMeanStateMerger, MinMaxMeanStateValidator, StateBuilder};
+use std::convert::Infallible;
 
 use crate::tree_config::TreeConfig;
+use itertools::Itertools;
 use numpy::ndarray::{Array1 as NdArray, ArrayView1 as NdArrayView, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{PyArray1, PyReadonlyArray1};
@@ -30,6 +32,44 @@ where
     T: NdFloat,
     MinMaxMeanState<T>: Into<T>,
 {
+    let it = values.iter().map(|&x| -> Result<T, Infallible> { Ok(x) });
+
+    mom_from_it(it, max_norder, thereshold).expect("Should not fail with infallible error")
+}
+
+#[pyfunction(name = "mom_from_batch_it")]
+fn py_mom_from_batch_it<'py>(
+    py: Python<'py>,
+    it: &'py PyAny,
+    max_norder: usize,
+    thereshold: f64,
+) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)>> {
+    let it = it
+        .iter()?
+        .map(|batch| -> PyResult<_> {
+            let py_array = batch?.downcast::<PyArray1<f64>>()?;
+            let py_ro = py_array.readonly();
+            Ok(py_ro.to_owned_array())
+        })
+        .flatten_ok();
+
+    Ok(mom_from_it(it, max_norder, thereshold)?
+        .into_iter()
+        .map(|(indexes, values)| (indexes.into_pyarray(py), values.into_pyarray(py)))
+        .collect())
+}
+
+fn mom_from_it<'a, T, E>(
+    it: impl Iterator<Item = Result<T, E>>,
+    max_norder: usize,
+    thereshold: T,
+) -> Result<Vec<(NdArray<usize>, NdArray<T>)>, E>
+where
+    T: NdFloat,
+    MinMaxMeanState<T>: Into<T>,
+{
+    let it_states = it.map(|x| x.map(MinMaxMeanState::from));
+
     let state_builder = StateBuilder::new(
         MinMaxMeanStateMerger::new(),
         MinMaxMeanStateValidator::new(thereshold),
@@ -37,11 +77,10 @@ where
 
     let tree_config = TreeConfig::new(12usize, 4usize, max_norder);
 
-    assert_eq!(values.len(), tree_config.max_norder_n_tile());
-    let it_states = values.iter().map(|&x| MinMaxMeanState::from(x));
+    let tree = build_tree(&state_builder, &tree_config, it_states)?;
 
-    let tree = build_tree(&state_builder, &tree_config, it_states);
-    tree.into_iter()
+    let output = tree
+        .into_iter()
         .map(|tiles| {
             let (indexes, values) = tiles
                 .into_inner()
@@ -52,13 +91,15 @@ where
                 values.into_iter().map(|x| x.into()).collect::<NdArray<_>>(),
             )
         })
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    Ok(output)
 }
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn mom_builder(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_mom_from_array, m)?)?;
+    m.add_function(wrap_pyfunction!(py_mom_from_batch_it, m)?)?;
     Ok(())
 }
 
