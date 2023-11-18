@@ -9,9 +9,9 @@ name = "mom_builder"
 crate-type = ["cdylib"]
 
 [dependencies]
-itertools = "0.10.1"
-numpy = "0.20.0"
-pyo3 = "0.20.0"
+itertools = "0.12"
+numpy = "0.20"
+pyo3 = "0.20"
 thiserror = "1.0.50"
 
 [dev-dependencies]
