@@ -1,0 +1,17 @@
+[package]
+name = "mom_builder"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "mom_builder"
+crate-type = ["cdylib"]
+
+[dependencies]
+numpy = "0.20.0"
+pyo3 = "0.20.0"
+thiserror = "1.0.50"
+
+[dev-dependencies]
+approx = "0.5.1"
