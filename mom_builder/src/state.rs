@@ -11,7 +11,7 @@ pub(crate) trait StateIsValid {
     fn state_is_valid(&self, state: &Self::State) -> bool;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MinMaxMeanState<T> {
     pub(crate) min: T,
     pub(crate) max: T,

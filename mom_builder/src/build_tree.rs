@@ -1,10 +1,10 @@
 use crate::norder_tiles::NorderTiles;
 use crate::state::{MergeStates, StateBuilder, StateIsValid};
-use crate::tree::{Tree, TreeMutRef};
+use crate::tree::{len_over_threshold, Tree, TreeMutRef};
 use crate::tree_config::TreeConfig;
 
 struct TreeBuilder<'a, Merger, Validator> {
-    builder: &'a StateBuilder<Merger, Validator>,
+    state_builder: &'a StateBuilder<Merger, Validator>,
     config: &'a TreeConfig,
 }
 
@@ -55,9 +55,9 @@ where
         assert_eq!(states.len(), self.config.n_children());
         assert_ne!(subtree.len(), 0);
 
-        let merged_state = self.builder.merger.merge(states);
+        let merged_state = self.state_builder.merger.merge(states);
 
-        if self.builder.validator.state_is_valid(&merged_state) {
+        if self.state_builder.validator.state_is_valid(&merged_state) {
             subtree
                 .last_mut()
                 .expect("tree should not be empty")
@@ -107,6 +107,114 @@ where
     }
 }
 
+struct TreeBuildIterator<'a, Merger, Validator, S, Input> {
+    builder: &'a TreeBuilder<'a, Merger, Validator>,
+    tree: Tree<S>,
+    max_norder_tiles: Input,
+    penutl_index: usize,
+    batch_size: usize,
+}
+
+impl<'a, Merger, Validator, S, Input, E> TreeBuildIterator<'a, Merger, Validator, S, Input>
+where
+    Input: Iterator<Item = Result<S, E>>,
+{
+    fn new(
+        max_norder_tiles: impl IntoIterator<Item = Result<S, E>, IntoIter = Input>,
+        builder: &'a TreeBuilder<'a, Merger, Validator>,
+        batch_size: usize,
+    ) -> Self {
+        assert_eq!(batch_size % builder.config.n_children(), 0);
+        Self {
+            builder,
+            tree: (0..=builder.config.max_norder())
+                .map(|_| NorderTiles::new())
+                .collect(),
+            max_norder_tiles: max_norder_tiles.into_iter(),
+            penutl_index: 0,
+            batch_size,
+        }
+    }
+}
+
+impl<'a, Merger, Validator, S, Input, E> Iterator
+    for TreeBuildIterator<'a, Merger, Validator, S, Input>
+where
+    Merger: MergeStates<State = S>,
+    Validator: StateIsValid<State = S>,
+    S: Copy + std::fmt::Debug,
+    Input: Iterator<Item = Result<S, E>>,
+{
+    type Item = Result<(usize, NorderTiles<S>), E>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let n_children = self.builder.config.n_children();
+
+        // Run tlle adding until we reach the end or we have batch_size element on any norder
+        loop {
+            // If we have reached the end, return first non-empty norder tiles storage
+            if self.penutl_index == self.builder.config.penult_norder_n_tile() {
+                break self
+                    .tree
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(norder, norder_tiles)| {
+                        if norder_tiles.len() == 0 {
+                            None
+                        } else {
+                            let norder_tiles = std::mem::replace(norder_tiles, NorderTiles::new());
+                            Some(Ok((norder, norder_tiles)))
+                        }
+                    })
+                    .next();
+            }
+
+            assert!(
+                self.tree.len() > 1,
+                "norder should be at least 1, so tree should have at least two norder_tiles"
+            );
+
+            if let Some(norder) = len_over_threshold(&mut self.tree, self.batch_size) {
+                let norder_tiles = std::mem::replace(&mut self.tree[norder], NorderTiles::new());
+                break Some(Ok((norder, norder_tiles)));
+            }
+
+            let result_states = (&mut self.max_norder_tiles)
+                .take(n_children)
+                .collect::<Result<Vec<_>, E>>();
+            let states = match result_states {
+                Ok(states) => states,
+                Err(e) => break Some(Err(e)),
+            };
+            assert_eq!(states.len(), n_children);
+
+            let (max_norder_tiles, subtree) = self
+                .tree
+                .split_last_mut()
+                .expect("tree should not be empty");
+
+            // Run recursive merge
+            let merged = self
+                .builder
+                .merge_states(subtree, &states, self.penutl_index);
+
+            // If not merged then insert the states into the current norder, max_norder
+            if !merged {
+                for (index, state) in (n_children * self.penutl_index
+                    ..n_children * (self.penutl_index + 1))
+                    .zip(states.into_iter())
+                {
+                    max_norder_tiles
+                        .insert(index, state)
+                        .expect("Tree insertion failed");
+                }
+            }
+
+            self.penutl_index += 1;
+        }
+    }
+}
+
 pub(crate) fn build_tree<S, Merger, Validator, E>(
     state_builder: &StateBuilder<Merger, Validator>,
     tree_config: &TreeConfig,
@@ -118,8 +226,59 @@ where
     S: Copy + std::fmt::Debug,
 {
     TreeBuilder {
-        builder: state_builder,
+        state_builder: state_builder,
         config: tree_config,
     }
     .build(max_norder_states)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator};
+    use std::convert::Infallible;
+
+    #[test]
+    fn test_builder_vs_iterator() {
+        let state_builder = StateBuilder::new(
+            MinMaxMeanStateMerger::new(),
+            MinMaxMeanStateValidator::new(0.5),
+        );
+        let tree_config = TreeConfig::new(12usize, 4usize, 1usize);
+        let tree_builder = TreeBuilder {
+            state_builder: &state_builder,
+            config: &tree_config,
+        };
+
+        let max_norder_states: Vec<_> = (0..48)
+            .map(|x| -> Result<_, Infallible> { Ok(MinMaxMeanState::new(x as f64)) })
+            .collect();
+
+        let tree_from_builder = tree_builder.build(max_norder_states.clone()).unwrap();
+
+        let tree_from_iterator_large_batch: Tree<_> =
+            TreeBuildIterator::new(max_norder_states.clone(), &tree_builder, 48)
+                .map(|r| r.expect("Infallible error should never occur"))
+                // check that norder is in ascending order
+                .enumerate()
+                .map(|(i, (norder, norder_tiles))| {
+                    assert_eq!(i, norder);
+                    norder_tiles
+                })
+                .collect();
+        assert_eq!(tree_from_builder, tree_from_iterator_large_batch);
+
+        let tree_from_iterator_small_batches = {
+            let mut tree = vec![NorderTiles::new(), NorderTiles::new()];
+            TreeBuildIterator::new(max_norder_states, &tree_builder, 4)
+                .map(|r| r.expect("Infallible error should never occur"))
+                .for_each(|(norder, mut norder_tiles)| {
+                    tree[norder]
+                        .append(&mut norder_tiles)
+                        .expect("Tree insertion failed");
+                });
+            tree
+        };
+        assert_eq!(tree_from_builder, tree_from_iterator_small_batches);
+    }
 }

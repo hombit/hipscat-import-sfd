@@ -1,6 +1,7 @@
 use crate::error::Error;
 use std::ops::Range;
 
+#[derive(PartialEq, Debug)]
 pub(crate) struct NorderTiles<T> {
     indexes: Vec<usize>,
     values: Vec<T>,
@@ -20,6 +21,18 @@ impl<T> NorderTiles<T> {
         }
         self.indexes.push(index);
         self.values.push(value);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append(&mut self, other: &mut Self) -> Result<(), Error> {
+        if !self.indexes.is_empty() && !other.indexes.is_empty() {
+            if self.indexes[self.indexes.len() - 1] >= other.indexes[0] {
+                return Err(Error::IndexError);
+            }
+        }
+        self.indexes.append(&mut other.indexes);
+        self.values.append(&mut other.values);
         Ok(())
     }
 
