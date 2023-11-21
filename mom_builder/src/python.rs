@@ -77,7 +77,7 @@ where
 
     let tree_config = TreeConfig::new(12usize, 4usize, max_norder);
 
-    let tree = build_tree(&state_builder, &tree_config, it_states)?;
+    let tree = build_tree(state_builder, tree_config, it_states)?;
 
     let output = tree
         .into_iter()

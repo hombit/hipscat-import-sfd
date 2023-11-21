@@ -52,6 +52,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct MinMaxMeanStateMerger<T> {
     phantom: PhantomData<T>,
 }
@@ -93,6 +94,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct MinMaxMeanStateValidator<T> {
     threshold: T,
 }
@@ -123,6 +125,7 @@ where
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct StateBuilder<Merger, Validator> {
     pub(crate) merger: Merger,
     pub(crate) validator: Validator,

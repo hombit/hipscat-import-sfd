@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub(crate) struct TreeConfig {
     #[allow(dead_code)]
     n_root: usize,

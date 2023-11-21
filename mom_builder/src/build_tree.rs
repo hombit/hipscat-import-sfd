@@ -3,12 +3,13 @@ use crate::state::{MergeStates, StateBuilder, StateIsValid};
 use crate::tree::{len_over_threshold, Tree, TreeMutRef};
 use crate::tree_config::TreeConfig;
 
-struct TreeBuilder<'a, Merger, Validator> {
-    state_builder: &'a StateBuilder<Merger, Validator>,
-    config: &'a TreeConfig,
+#[derive(Clone)]
+pub(crate) struct TreeBuilder<Merger, Validator> {
+    state_builder: StateBuilder<Merger, Validator>,
+    config: TreeConfig,
 }
 
-impl<'a, S, Merger, Validator> TreeBuilder<'a, Merger, Validator>
+impl<S, Merger, Validator> TreeBuilder<Merger, Validator>
 where
     Merger: MergeStates<State = S>,
     Validator: StateIsValid<State = S>,
@@ -107,38 +108,37 @@ where
     }
 }
 
-struct TreeBuildIterator<'a, Merger, Validator, S, Input> {
-    builder: &'a TreeBuilder<'a, Merger, Validator>,
+pub(crate) struct TreeBuildIterator<Merger, Validator, S, Input> {
+    builder: TreeBuilder<Merger, Validator>,
     tree: Tree<S>,
     max_norder_tiles: Input,
     penutl_index: usize,
     batch_size: usize,
 }
 
-impl<'a, Merger, Validator, S, Input, E> TreeBuildIterator<'a, Merger, Validator, S, Input>
+impl<Merger, Validator, S, Input, E> TreeBuildIterator<Merger, Validator, S, Input>
 where
     Input: Iterator<Item = Result<S, E>>,
 {
-    fn new(
+    pub(crate) fn new(
         max_norder_tiles: impl IntoIterator<Item = Result<S, E>, IntoIter = Input>,
-        builder: &'a TreeBuilder<'a, Merger, Validator>,
+        builder: TreeBuilder<Merger, Validator>,
         batch_size: usize,
     ) -> Self {
         assert_eq!(batch_size % builder.config.n_children(), 0);
         Self {
-            builder,
             tree: (0..=builder.config.max_norder())
                 .map(|_| NorderTiles::new())
                 .collect(),
             max_norder_tiles: max_norder_tiles.into_iter(),
             penutl_index: 0,
             batch_size,
+            builder,
         }
     }
 }
 
-impl<'a, Merger, Validator, S, Input, E> Iterator
-    for TreeBuildIterator<'a, Merger, Validator, S, Input>
+impl<Merger, Validator, S, Input, E> Iterator for TreeBuildIterator<Merger, Validator, S, Input>
 where
     Merger: MergeStates<State = S>,
     Validator: StateIsValid<State = S>,
@@ -216,8 +216,8 @@ where
 }
 
 pub(crate) fn build_tree<S, Merger, Validator, E>(
-    state_builder: &StateBuilder<Merger, Validator>,
-    tree_config: &TreeConfig,
+    state_builder: StateBuilder<Merger, Validator>,
+    tree_config: TreeConfig,
     max_norder_states: impl IntoIterator<Item = Result<S, E>>,
 ) -> Result<Tree<S>, E>
 where
@@ -226,7 +226,7 @@ where
     S: Copy + std::fmt::Debug,
 {
     TreeBuilder {
-        state_builder: state_builder,
+        state_builder,
         config: tree_config,
     }
     .build(max_norder_states)
@@ -246,8 +246,8 @@ mod tests {
         );
         let tree_config = TreeConfig::new(12usize, 4usize, 1usize);
         let tree_builder = TreeBuilder {
-            state_builder: &state_builder,
-            config: &tree_config,
+            state_builder: state_builder,
+            config: tree_config,
         };
 
         let max_norder_states: Vec<_> = (0..48)
@@ -257,7 +257,7 @@ mod tests {
         let tree_from_builder = tree_builder.build(max_norder_states.clone()).unwrap();
 
         let tree_from_iterator_large_batch: Tree<_> =
-            TreeBuildIterator::new(max_norder_states.clone(), &tree_builder, 48)
+            TreeBuildIterator::new(max_norder_states.clone(), tree_builder.clone(), 48)
                 .map(|r| r.expect("Infallible error should never occur"))
                 // check that norder is in ascending order
                 .enumerate()
@@ -270,7 +270,7 @@ mod tests {
 
         let tree_from_iterator_small_batches = {
             let mut tree = vec![NorderTiles::new(), NorderTiles::new()];
-            TreeBuildIterator::new(max_norder_states, &tree_builder, 4)
+            TreeBuildIterator::new(max_norder_states, tree_builder, 4)
                 .map(|r| r.expect("Infallible error should never occur"))
                 .for_each(|(norder, mut norder_tiles)| {
                     tree[norder]
