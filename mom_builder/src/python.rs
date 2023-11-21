@@ -82,10 +82,7 @@ where
     let output = tree
         .into_iter()
         .map(|tiles| {
-            let (indexes, values) = tiles
-                .into_inner()
-                .expect("Cannot consume RwLock to get tree norder-storage")
-                .into_tuple();
+            let (indexes, values) = tiles.into_tuple();
             (
                 indexes.into_iter().collect::<NdArray<_>>(),
                 values.into_iter().map(|x| x.into()).collect::<NdArray<_>>(),
