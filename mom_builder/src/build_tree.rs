@@ -5,8 +5,8 @@ use crate::tree_config::TreeConfig;
 
 #[derive(Clone)]
 pub(crate) struct TreeBuilder<Merger, Validator> {
-    state_builder: StateBuilder<Merger, Validator>,
-    config: TreeConfig,
+    pub(crate) state_builder: StateBuilder<Merger, Validator>,
+    pub(crate) config: TreeConfig,
 }
 
 impl<S, Merger, Validator> TreeBuilder<Merger, Validator>
@@ -108,46 +108,35 @@ where
     }
 }
 
-pub(crate) struct TreeBuildIterator<Merger, Validator, S, Input> {
+pub(crate) struct TreeBuildStage<Merger, Validator, S> {
     builder: TreeBuilder<Merger, Validator>,
     tree: Tree<S>,
-    max_norder_tiles: Input,
     penutl_index: usize,
     batch_size: usize,
 }
 
-impl<Merger, Validator, S, Input, E> TreeBuildIterator<Merger, Validator, S, Input>
-where
-    Input: Iterator<Item = Result<S, E>>,
-{
-    pub(crate) fn new(
-        max_norder_tiles: impl IntoIterator<Item = Result<S, E>, IntoIter = Input>,
-        builder: TreeBuilder<Merger, Validator>,
-        batch_size: usize,
-    ) -> Self {
+impl<Merger, Validator, S> TreeBuildStage<Merger, Validator, S> {
+    pub(crate) fn new(builder: TreeBuilder<Merger, Validator>, batch_size: usize) -> Self {
         assert_eq!(batch_size % builder.config.n_children(), 0);
         Self {
             tree: (0..=builder.config.max_norder())
                 .map(|_| NorderTiles::new())
                 .collect(),
-            max_norder_tiles: max_norder_tiles.into_iter(),
             penutl_index: 0,
             batch_size,
             builder,
         }
     }
-}
 
-impl<Merger, Validator, S, Input, E> Iterator for TreeBuildIterator<Merger, Validator, S, Input>
-where
-    Merger: MergeStates<State = S>,
-    Validator: StateIsValid<State = S>,
-    S: Copy + std::fmt::Debug,
-    Input: Iterator<Item = Result<S, E>>,
-{
-    type Item = Result<(usize, NorderTiles<S>), E>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub(crate) fn next_with_iter<E>(
+        &mut self,
+        max_norder_tiles: &mut impl Iterator<Item = Result<S, E>>,
+    ) -> Option<Result<(usize, NorderTiles<S>), E>>
+    where
+        Merger: MergeStates<State = S>,
+        Validator: StateIsValid<State = S>,
+        S: Copy + std::fmt::Debug,
+    {
         let n_children = self.builder.config.n_children();
 
         // Run tlle adding until we reach the end or we have batch_size element on any norder
@@ -179,7 +168,7 @@ where
                 break Some(Ok((norder, norder_tiles)));
             }
 
-            let result_states = (&mut self.max_norder_tiles)
+            let result_states = max_norder_tiles
                 .take(n_children)
                 .collect::<Result<Vec<_>, E>>();
             let states = match result_states {
@@ -212,6 +201,45 @@ where
 
             self.penutl_index += 1;
         }
+    }
+}
+
+pub(crate) struct TreeBuildIterator<Merger, Validator, S, Input>
+where
+    Input: ?Sized,
+{
+    stage: TreeBuildStage<Merger, Validator, S>,
+    max_norder_tiles: Input,
+}
+
+impl<Merger, Validator, S, Input, E> TreeBuildIterator<Merger, Validator, S, Input>
+where
+    Input: Iterator<Item = Result<S, E>>,
+{
+    pub(crate) fn new(
+        max_norder_tiles: impl IntoIterator<Item = Result<S, E>, IntoIter = Input>,
+        builder: TreeBuilder<Merger, Validator>,
+        batch_size: usize,
+    ) -> Self {
+        assert_eq!(batch_size % builder.config.n_children(), 0);
+        Self {
+            stage: TreeBuildStage::new(builder, batch_size),
+            max_norder_tiles: max_norder_tiles.into_iter(),
+        }
+    }
+}
+
+impl<Merger, Validator, S, Input, E> Iterator for TreeBuildIterator<Merger, Validator, S, Input>
+where
+    Merger: MergeStates<State = S>,
+    Validator: StateIsValid<State = S>,
+    S: Copy + std::fmt::Debug,
+    Input: Iterator<Item = Result<S, E>>,
+{
+    type Item = Result<(usize, NorderTiles<S>), E>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.stage.next_with_iter(&mut self.max_norder_tiles)
     }
 }
 
