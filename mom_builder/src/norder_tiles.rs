@@ -24,18 +24,6 @@ impl<T> NorderTiles<T> {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn append(&mut self, other: &mut Self) -> Result<(), Error> {
-        if !self.indexes.is_empty() && !other.indexes.is_empty() {
-            if self.indexes[self.indexes.len() - 1] >= other.indexes[0] {
-                return Err(Error::IndexError);
-            }
-        }
-        self.indexes.append(&mut other.indexes);
-        self.values.append(&mut other.values);
-        Ok(())
-    }
-
     pub(crate) fn pop(&mut self) {
         self.indexes.pop();
         self.values.pop();
