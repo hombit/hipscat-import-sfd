@@ -112,13 +112,18 @@ struct MomBuilder {
 
 impl MomBuilder {
     fn tree_to_python<'py>(
+        &self,
         py: Python<'py>,
         tree: Tree<MinMaxMeanState<f64>>,
-    ) -> Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)> {
+        norder_offset: usize,
+    ) -> Vec<(usize, &'py PyArray1<usize>, &'py PyArray1<f64>)> {
         tree.into_iter()
-            .map(|tiles| {
+            .enumerate()
+            .filter(|(_norder, tiles)| tiles.len() != 0)
+            .map(|(norder, tiles)| {
                 let (indexes, values) = tiles.into_tuple();
                 (
+                    norder + norder_offset,
                     NdArray::from_vec(indexes).into_pyarray(py),
                     values
                         .into_iter()
@@ -195,7 +200,7 @@ impl MomBuilder {
         py: Python<'py>,
         intermediate_index: usize,
         a: PyReadonlyArray1<f64>,
-    ) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)>> {
+    ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyArray1<f64>)>> {
         if self
             .intermediate_states
             .read()
@@ -243,13 +248,13 @@ impl MomBuilder {
             .insert(intermediate_index, state);
 
         // Return the rest of the subtree
-        Ok(Self::tree_to_python(py, tree))
+        Ok(self.tree_to_python(py, tree, self.intermediate_norder + 1))
     }
 
     fn build_top_tree<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)>> {
+    ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyArray1<f64>)>> {
         if self
             .intermediate_states
             .read()
@@ -276,7 +281,7 @@ impl MomBuilder {
 
         let tree = build_tree(self.state_builder, self.top_tree_config.clone(), it_states)?;
 
-        Ok(Self::tree_to_python(py, tree))
+        Ok(self.tree_to_python(py, tree, 0))
     }
 }
 
