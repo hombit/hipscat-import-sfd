@@ -10,6 +10,7 @@
 /// 7. Make builder to be Rust iterator / Python generator
 mod build_tree;
 mod error;
+mod exclusive_option;
 mod norder_tiles;
 mod python;
 mod state;

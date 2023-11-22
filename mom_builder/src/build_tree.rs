@@ -1,7 +1,9 @@
+use crate::exclusive_option::ExclusiveOption;
 use crate::norder_tiles::NorderTiles;
 use crate::state::{MergeStates, StateBuilder, StateIsValid};
-use crate::tree::{len_over_threshold, Tree, TreeMutRef};
+use crate::tree::{Tree, TreeMutRef};
 use crate::tree_config::TreeConfig;
+use itertools::Itertools;
 
 #[derive(Clone)]
 pub(crate) struct TreeBuilder<Merger, Validator> {
@@ -17,21 +19,35 @@ where
 {
     fn build<E>(
         &self,
-        max_norder_states: impl IntoIterator<Item = Result<S, E>>,
+        max_norder_states: impl IntoIterator<Item = Result<(usize, S), E>>,
     ) -> Result<Tree<S>, E> {
         let mut tree: Tree<S> = (0..=self.config.max_norder())
             .map(|_| NorderTiles::new())
             .collect();
         let (max_norder_tiles, subtree) = tree.split_last_mut().expect("tree should not be empty");
 
-        let mut state_it = max_norder_states.into_iter();
+        // Group states by Some(parent_index) if Ok, or a single-element group of None if Err
+        // We use here custom ExclusiveOption instead of Option to make sure that errors are not
+        // being grouped and the very first error is returned.
+        let groups = max_norder_states
+            .into_iter()
+            .group_by(|result| match result {
+                Ok((index, _state)) => ExclusiveOption::Some(*index / self.config.n_children()),
+                Err(_) => ExclusiveOption::None,
+            });
 
-        let parent_order_n_tiles = self.config.max_norder_n_tile() / self.config.n_children();
-        for parent_index in 0..parent_order_n_tiles {
-            let states = (&mut state_it)
-                .take(self.config.n_children())
+        for (parent_index, group) in groups.into_iter() {
+            let states = group
+                .map(|result| result.map(|(_index, state)| state))
                 .collect::<Result<Vec<_>, E>>()?;
-            assert_eq!(states.len(), self.config.n_children());
+            let parent_index = parent_index.expect("Error has been processed before");
+
+            if states.len() < self.config.n_children() {
+                continue;
+            }
+            if states.len() > self.config.n_children() {
+                panic!("Too many states in one group, check if index is correct");
+            }
 
             // Run recursive merge
             let merged = self.merge_states(subtree, &states, parent_index);
@@ -108,145 +124,10 @@ where
     }
 }
 
-pub(crate) struct TreeBuildStage<Merger, Validator, S> {
-    builder: TreeBuilder<Merger, Validator>,
-    tree: Tree<S>,
-    penutl_index: usize,
-    batch_size: usize,
-}
-
-impl<Merger, Validator, S> TreeBuildStage<Merger, Validator, S> {
-    pub(crate) fn new(builder: TreeBuilder<Merger, Validator>, batch_size: usize) -> Self {
-        assert_eq!(batch_size % builder.config.n_children(), 0);
-        Self {
-            tree: (0..=builder.config.max_norder())
-                .map(|_| NorderTiles::new())
-                .collect(),
-            penutl_index: 0,
-            batch_size,
-            builder,
-        }
-    }
-
-    pub(crate) fn next_with_iter<E>(
-        &mut self,
-        max_norder_tiles: &mut impl Iterator<Item = Result<S, E>>,
-    ) -> Option<Result<(usize, NorderTiles<S>), E>>
-    where
-        Merger: MergeStates<State = S>,
-        Validator: StateIsValid<State = S>,
-        S: Copy + std::fmt::Debug,
-    {
-        let n_children = self.builder.config.n_children();
-
-        // Run tlle adding until we reach the end or we have batch_size element on any norder
-        loop {
-            // If we have reached the end, return first non-empty norder tiles storage
-            if self.penutl_index == self.builder.config.penult_norder_n_tile() {
-                break self
-                    .tree
-                    .iter_mut()
-                    .enumerate()
-                    .filter_map(|(norder, norder_tiles)| {
-                        if norder_tiles.len() == 0 {
-                            None
-                        } else {
-                            let norder_tiles = std::mem::replace(norder_tiles, NorderTiles::new());
-                            Some(Ok((norder, norder_tiles)))
-                        }
-                    })
-                    .next();
-            }
-
-            assert!(
-                self.tree.len() > 1,
-                "norder should be at least 1, so tree should have at least two norder_tiles"
-            );
-
-            if let Some(norder) = len_over_threshold(&mut self.tree, self.batch_size) {
-                let norder_tiles = std::mem::replace(&mut self.tree[norder], NorderTiles::new());
-                break Some(Ok((norder, norder_tiles)));
-            }
-
-            let result_states = max_norder_tiles
-                .take(n_children)
-                .collect::<Result<Vec<_>, E>>();
-            let states = match result_states {
-                Ok(states) => states,
-                Err(e) => break Some(Err(e)),
-            };
-            assert_eq!(states.len(), n_children);
-
-            let (max_norder_tiles, subtree) = self
-                .tree
-                .split_last_mut()
-                .expect("tree should not be empty");
-
-            // Run recursive merge
-            let merged = self
-                .builder
-                .merge_states(subtree, &states, self.penutl_index);
-
-            // If not merged then insert the states into the current norder, max_norder
-            if !merged {
-                for (index, state) in (n_children * self.penutl_index
-                    ..n_children * (self.penutl_index + 1))
-                    .zip(states.into_iter())
-                {
-                    max_norder_tiles
-                        .insert(index, state)
-                        .expect("Tree insertion failed");
-                }
-            }
-
-            self.penutl_index += 1;
-        }
-    }
-}
-
-pub(crate) struct TreeBuildIterator<Merger, Validator, S, Input>
-where
-    Input: ?Sized,
-{
-    stage: TreeBuildStage<Merger, Validator, S>,
-    max_norder_tiles: Input,
-}
-
-impl<Merger, Validator, S, Input, E> TreeBuildIterator<Merger, Validator, S, Input>
-where
-    Input: Iterator<Item = Result<S, E>>,
-{
-    pub(crate) fn new(
-        max_norder_tiles: impl IntoIterator<Item = Result<S, E>, IntoIter = Input>,
-        builder: TreeBuilder<Merger, Validator>,
-        batch_size: usize,
-    ) -> Self {
-        assert_eq!(batch_size % builder.config.n_children(), 0);
-        Self {
-            stage: TreeBuildStage::new(builder, batch_size),
-            max_norder_tiles: max_norder_tiles.into_iter(),
-        }
-    }
-}
-
-impl<Merger, Validator, S, Input, E> Iterator for TreeBuildIterator<Merger, Validator, S, Input>
-where
-    Merger: MergeStates<State = S>,
-    Validator: StateIsValid<State = S>,
-    S: Copy + std::fmt::Debug,
-    Input: Iterator<Item = Result<S, E>>,
-{
-    type Item = Result<(usize, NorderTiles<S>), E>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.stage.next_with_iter(&mut self.max_norder_tiles)
-    }
-}
-
 pub(crate) fn build_tree<S, Merger, Validator, E>(
     state_builder: StateBuilder<Merger, Validator>,
     tree_config: TreeConfig,
-    max_norder_states: impl IntoIterator<Item = Result<S, E>>,
+    max_norder_states: impl IntoIterator<Item = Result<(usize, S), E>>,
 ) -> Result<Tree<S>, E>
 where
     Merger: MergeStates<State = S>,

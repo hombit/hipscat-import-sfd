@@ -1,18 +1,15 @@
-use crate::build_tree::{build_tree, TreeBuildIterator, TreeBuildStage, TreeBuilder};
+use crate::build_tree::build_tree;
 use crate::state::{
     MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator, StateBuilder,
 };
 use std::convert::Infallible;
-use std::ops::DerefMut;
 
-use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
-use numpy::ndarray::{s, Array1 as NdArray, ArrayView1 as NdArrayView, NdFloat};
+use numpy::ndarray::{Array1 as NdArray, ArrayView1 as NdArrayView, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
-use pyo3::types::PyIterator;
 
 #[pyfunction(name = "mom_from_array")]
 fn py_mom_from_array<'py>(
@@ -72,7 +69,9 @@ where
     T: NdFloat,
     MinMaxMeanState<T>: Into<T>,
 {
-    let it_states = it.map(|x| x.map(MinMaxMeanState::from));
+    let it_states = it
+        .enumerate()
+        .map(|(index, x)| x.map(|value| (index, MinMaxMeanState::from(value))));
 
     let state_builder = StateBuilder::new(
         MinMaxMeanStateMerger::new(),
@@ -96,136 +95,10 @@ where
     Ok(output)
 }
 
-#[pyclass(unsendable)]
-struct MomBuilderIterator {
-    stage: TreeBuildStage<
-        MinMaxMeanStateMerger<f64>,
-        MinMaxMeanStateValidator<f64>,
-        MinMaxMeanState<f64>,
-    >,
-    input_it: PyObject,
-    array: NdArray<f64>,
-    cursor: usize,
-}
-
-#[pymethods]
-impl MomBuilderIterator {
-    #[new]
-    fn __new__<'py>(
-        py: Python<'py>,
-        it: &'py PyAny,
-        max_norder: usize,
-        thereshold: f64,
-        batch_size: usize,
-    ) -> PyResult<Self> {
-        let state_builder = StateBuilder::new(
-            MinMaxMeanStateMerger::new(),
-            MinMaxMeanStateValidator::new(thereshold),
-        );
-        let tree_builder = TreeBuilder {
-            state_builder,
-            config: TreeConfig::new(12usize, 4usize, max_norder),
-        };
-        let stage = TreeBuildStage::new(tree_builder, batch_size);
-        let input_it = it.iter()?.into_py(py);
-        Ok(Self {
-            stage,
-            input_it,
-            array: NdArray::zeros(0),
-            cursor: 0,
-        })
-    }
-
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
-        slf
-    }
-
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
-        let py = slf.py();
-        let slf: &mut Self = slf.deref_mut();
-
-        let array_slice = slf.array.slice(s![slf.cursor..]);
-        let mut new_array = NdArray::zeros(0);
-
-        let mut it_states = array_slice
-            .iter()
-            .map(|&x| Ok(x))
-            .chain(
-                slf.input_it
-                    .as_ref(py)
-                    .iter()?
-                    .map(|batch| {
-                        let py_array = batch?.downcast::<PyArray1<f64>>()?;
-                        let py_ro = py_array.readonly();
-                        new_array = py_ro.to_owned_array();
-                        Ok(&new_array)
-                    })
-                    .flatten_ok()
-                    .map(|x: PyResult<&f64>| -> PyResult<f64> { x.copied() }),
-            )
-            .map(|x| x.map(|x| MinMaxMeanState::from(x)));
-        slf.stage
-            .next_with_iter(&mut it_states)
-            .transpose()
-            .map(|option| option.map(|(norder, norder_tiles)| py.None()))
-    }
-}
-
-// #[pymethods]
-// impl MomBuilderIterator {
-//     #[new]
-//     fn new<'py>(
-//         _py: Python<'py>,
-//         it: &PyAny,
-//         max_norder: usize,
-//         thereshold: f64,
-//         batch_size: usize,
-//     ) -> PyResult<Self> {
-//         if batch_size % 4 != 0 {
-//             return Err(pyo3::exceptions::PyValueError::new_err(
-//                 "batch_size must be a multiple of 4",
-//             ));
-//         }
-//
-//         let it_states = it
-//             .iter()?
-//             .map(|batch| {
-//                 let py_array = batch.unwrap().downcast::<PyArray1<f64>>().unwrap();
-//                 let py_ro = py_array.readonly();
-//                 py_ro.to_owned_array()
-//             })
-//             .flatten()
-//             .map(|x| -> Result<_, Infallible> { Ok(MinMaxMeanState::from(x)) });
-//
-//         let state_builder = StateBuilder::new(
-//             MinMaxMeanStateMerger::new(),
-//             MinMaxMeanStateValidator::new(thereshold),
-//         );
-//
-//         let tree_config = TreeConfig::new(12usize, 4usize, max_norder);
-//         let state_builder = TreeBuilder {
-//             state_builder,
-//             config: tree_config,
-//         };
-//
-//         let inner: Box<
-//             TreeBuildIterator<
-//                 MinMaxMeanStateMerger<f64>,
-//                 MinMaxMeanStateValidator<f64>,
-//                 MinMaxMeanState<f64>,
-//                 dyn Iterator<Item = Result<MinMaxMeanState<f64>, Infallible>> + Send + Sync,
-//             >,
-//         > = Box::new(TreeBuildIterator::new(it_states, state_builder, batch_size));
-//
-//         Ok(Self { inner })
-//     }
-// }
-
 #[pymodule]
 fn mom_builder(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_mom_from_array, m)?)?;
     m.add_function(wrap_pyfunction!(py_mom_from_batch_it, m)?)?;
-    m.add_class::<MomBuilderIterator>()?;
     Ok(())
 }
 
