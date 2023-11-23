@@ -2,10 +2,6 @@ use crate::build_tree::build_tree;
 use crate::state::{
     MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator, StateBuilder,
 };
-use std::collections::BTreeMap;
-use std::convert::Infallible;
-use std::sync::RwLock;
-
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
@@ -13,6 +9,10 @@ use numpy::ndarray::{Array1 as NdArray, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{dtype, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::prelude::*;
+use std::collections::BTreeMap;
+use std::convert::Infallible;
+use std::iter::once;
+use std::sync::RwLock;
 
 #[pyfunction(name = "mom_from_array")]
 fn py_mom_from_array<'py>(
@@ -66,16 +66,38 @@ fn py_mom_from_batch_it<'py>(
     max_norder: usize,
     threshold: f64,
 ) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>> {
-    let it = it
-        .iter()?
-        .map(|batch| -> PyResult<_> {
-            let py_array = batch?.downcast::<PyArray1<f64>>()?;
-            let py_ro = py_array.readonly();
-            Ok(py_ro.to_owned_array())
-        })
-        .flatten_ok();
+    let mut py_iter = it.iter()?;
+    let first_element = py_iter
+        .next()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Input iterator is empty"))??;
 
-    mom_from_it(py, it, max_norder, threshold)
+    if let Ok(array) = first_element.downcast::<PyArray1<f32>>() {
+        let it = once(array)
+            .map(|array| Ok(array))
+            .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<f32>>()?)))
+            .map_ok(|py_array| {
+                let py_ro = py_array.readonly();
+                py_ro.to_owned_array()
+            })
+            .flatten_ok();
+
+        mom_from_it(py, it, max_norder, threshold as f32)
+    } else if let Ok(array) = first_element.downcast::<PyArray1<f64>>() {
+        let it = once(array)
+            .map(|array| Ok(array))
+            .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<f64>>()?)))
+            .map_ok(|py_array| {
+                let py_ro = py_array.readonly();
+                py_ro.to_owned_array()
+            })
+            .flatten_ok();
+
+        mom_from_it(py, it, max_norder, threshold)
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Iterator items must be 1-D numpy arrays having dtype f32 or f64",
+        ))
+    }
 }
 
 fn mom_from_it<'py, T, E>(
