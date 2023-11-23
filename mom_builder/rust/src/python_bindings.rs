@@ -98,7 +98,7 @@ where
     Ok(output)
 }
 
-#[pyclass]
+#[pyclass(name = "MOMBuilder")]
 struct MomBuilder {
     #[pyo3(get)]
     intermediate_norder: usize,
@@ -143,7 +143,7 @@ impl MomBuilder {
 #[pymethods]
 impl MomBuilder {
     #[new]
-    fn __new__(intermediate_norder: usize, max_norder: usize, threshold: f64) -> PyResult<Self> {
+    fn __new__(max_norder: usize, intermediate_norder: usize, threshold: f64) -> PyResult<Self> {
         if intermediate_norder > max_norder {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "intermediate_norder must be less than or equal to max_norder",

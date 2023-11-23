@@ -12,7 +12,7 @@ mod build_tree;
 mod error;
 mod exclusive_option;
 mod norder_tiles;
-mod python;
+mod python_bindings;
 mod state;
 mod tree;
 mod tree_config;
