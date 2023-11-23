@@ -9,6 +9,7 @@ use numpy::ndarray::{Array1 as NdArray, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{dtype, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::prelude::*;
+use pyo3::types::PyIterator;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::iter::once;
@@ -72,32 +73,37 @@ fn py_mom_from_batch_it<'py>(
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Input iterator is empty"))??;
 
     if let Ok(array) = first_element.downcast::<PyArray1<f32>>() {
-        let it = once(array)
-            .map(|array| Ok(array))
-            .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<f32>>()?)))
-            .map_ok(|py_array| {
-                let py_ro = py_array.readonly();
-                py_ro.to_owned_array()
-            })
-            .flatten_ok();
-
-        mom_from_it(py, it, max_norder, threshold as f32)
+        mom_from_first_and_it(py, array, &py_iter, max_norder, threshold as f32)
     } else if let Ok(array) = first_element.downcast::<PyArray1<f64>>() {
-        let it = once(array)
-            .map(|array| Ok(array))
-            .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<f64>>()?)))
-            .map_ok(|py_array| {
-                let py_ro = py_array.readonly();
-                py_ro.to_owned_array()
-            })
-            .flatten_ok();
-
-        mom_from_it(py, it, max_norder, threshold)
+        mom_from_first_and_it(py, array, &py_iter, max_norder, threshold)
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
             "Iterator items must be 1-D numpy arrays having dtype f32 or f64",
         ))
     }
+}
+
+fn mom_from_first_and_it<'py, T>(
+    py: Python<'py>,
+    first: &'py PyArray1<T>,
+    py_iter: &'py PyIterator,
+    max_norder: usize,
+    threshold: T,
+) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>>
+where
+    T: NdFloat + numpy::Element,
+    MinMaxMeanState<T>: Into<T>,
+{
+    let it = once(first)
+        .map(|array| Ok(array))
+        .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<T>>()?)))
+        .map_ok(|py_array| {
+            let py_ro = py_array.readonly();
+            py_ro.to_owned_array()
+        })
+        .flatten_ok();
+
+    mom_from_it(py, it, max_norder, threshold)
 }
 
 fn mom_from_it<'py, T, E>(
