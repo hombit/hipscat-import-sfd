@@ -9,36 +9,54 @@ use std::sync::RwLock;
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
-use numpy::ndarray::{Array1 as NdArray, ArrayView1 as NdArrayView, NdFloat};
+use numpy::ndarray::{Array1 as NdArray, NdFloat};
 use numpy::IntoPyArray;
-use numpy::{PyArray1, PyReadonlyArray1};
+use numpy::{dtype, PyArray1, PyReadonlyArray1, PyUntypedArray};
 use pyo3::prelude::*;
 
 #[pyfunction(name = "mom_from_array")]
 fn py_mom_from_array<'py>(
     py: Python<'py>,
-    a: PyReadonlyArray1<f64>,
+    a: &'py PyUntypedArray,
     max_norder: usize,
-    thereshold: f64,
-) -> Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)> {
-    mom_from_array(a.as_array(), max_norder, thereshold)
-        .into_iter()
-        .map(|(indexes, values)| (indexes.into_pyarray(py), values.into_pyarray(py)))
-        .collect()
+    threshold: f64,
+) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>> {
+    if a.ndim() != 1 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Input array must be 1-dimensional",
+        ));
+    }
+
+    let element_type = a.dtype();
+
+    if element_type.is_equiv_to(dtype::<f32>(py)) {
+        let a = a.downcast::<PyArray1<f32>>()?;
+        Ok(mom_from_array(py, a, max_norder, threshold as f32))
+    } else if element_type.is_equiv_to(dtype::<f64>(py)) {
+        let a = a.downcast::<PyArray1<f64>>()?;
+        Ok(mom_from_array(py, a, max_norder, threshold))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "Input array's dtype must be f32 or f64",
+        ))
+    }
 }
 
-fn mom_from_array<T>(
-    values: NdArrayView<T>,
+fn mom_from_array<'py, T>(
+    py: Python<'py>,
+    py_array: &'py PyArray1<T>,
     max_norder: usize,
     threshold: T,
-) -> Vec<(NdArray<usize>, NdArray<T>)>
+) -> Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>
 where
-    T: NdFloat,
+    T: NdFloat + numpy::Element,
     MinMaxMeanState<T>: Into<T>,
 {
-    let it = values.iter().map(|&x| -> Result<T, Infallible> { Ok(x) });
+    let readonly = py_array.readonly();
+    let array = readonly.as_array();
+    let it = array.iter().map(|&x| -> Result<T, Infallible> { Ok(x) });
 
-    mom_from_it(it, max_norder, threshold).expect("Should not fail with infallible error")
+    mom_from_it(py, it, max_norder, threshold).expect("Should not fail with infallible error")
 }
 
 #[pyfunction(name = "mom_from_batch_it")]
@@ -46,8 +64,8 @@ fn py_mom_from_batch_it<'py>(
     py: Python<'py>,
     it: &'py PyAny,
     max_norder: usize,
-    thereshold: f64,
-) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyArray1<f64>)>> {
+    threshold: f64,
+) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>> {
     let it = it
         .iter()?
         .map(|batch| -> PyResult<_> {
@@ -57,19 +75,17 @@ fn py_mom_from_batch_it<'py>(
         })
         .flatten_ok();
 
-    Ok(mom_from_it(it, max_norder, thereshold)?
-        .into_iter()
-        .map(|(indexes, values)| (indexes.into_pyarray(py), values.into_pyarray(py)))
-        .collect())
+    mom_from_it(py, it, max_norder, threshold)
 }
 
-fn mom_from_it<'a, T, E>(
+fn mom_from_it<'py, T, E>(
+    py: Python<'py>,
     it: impl Iterator<Item = Result<T, E>>,
     max_norder: usize,
     threshold: T,
-) -> Result<Vec<(NdArray<usize>, NdArray<T>)>, E>
+) -> Result<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>, E>
 where
-    T: NdFloat,
+    T: NdFloat + numpy::Element,
     MinMaxMeanState<T>: Into<T>,
 {
     let it_states = it
@@ -90,8 +106,13 @@ where
         .map(|tiles| {
             let (indexes, values) = tiles.into_tuple();
             (
-                indexes.into_iter().collect::<NdArray<_>>(),
-                values.into_iter().map(|x| x.into()).collect::<NdArray<_>>(),
+                indexes.into_iter().collect::<NdArray<_>>().into_pyarray(py),
+                values
+                    .into_iter()
+                    .map(|x| x.into())
+                    .collect::<NdArray<_>>()
+                    .into_pyarray(py)
+                    .as_untyped(),
             )
         })
         .collect::<Vec<_>>();
