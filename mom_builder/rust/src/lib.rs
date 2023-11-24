@@ -6,8 +6,9 @@
 /// 3. --Reimplement without RWLock-- (done)
 /// 4. Run in parallel
 /// 5. --mom_from_func to build more lazily-- (added mom_from_it instead)
-/// 6. Support f32 arrays
-/// 7. Make builder to be Rust iterator / Python generator
+/// 6. --Support f32 arrays-- (done)
+/// 7. --Make builder to be Rust iterator / Python generator--
+///     (hard to do, MomBuilder and gen_mom_from_fn instead)
 mod build_tree;
 mod error;
 mod exclusive_option;
