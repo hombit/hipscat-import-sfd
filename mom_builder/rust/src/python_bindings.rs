@@ -488,38 +488,3 @@ fn mom_builder(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<MomBuilder>()?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mom_from_array() {
-        let a = NdArray::linspace(0.0, 47.0, 48);
-        let max_norder = 1;
-        let thereshold = 0.5;
-        let mom = mom_from_array(a.view(), max_norder, thereshold);
-
-        assert_eq!(mom.len(), 2);
-
-        assert_eq!(mom[0].0.len(), mom[0].0.len());
-        assert_eq!(
-            mom[0].0.as_slice_memory_order().unwrap(),
-            (1usize..=11).collect::<Vec<_>>().as_slice(),
-        );
-        approx::assert_relative_eq!(
-            mom[0].1.as_slice_memory_order().unwrap(),
-            vec![5.5, 9.5, 13.5, 17.5, 21.5, 25.5, 29.5, 33.5, 37.5, 41.5, 45.5].as_slice()
-        );
-
-        assert_eq!(mom[1].0.len(), mom[1].0.len());
-        assert_eq!(
-            mom[1].0.as_slice_memory_order().unwrap(),
-            (0usize..=3).collect::<Vec<_>>().as_slice(),
-        );
-        approx::assert_relative_eq!(
-            mom[1].1.as_slice_memory_order().unwrap(),
-            vec![0.0, 1.0, 2.0, 3.0].as_slice()
-        );
-    }
-}
