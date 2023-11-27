@@ -1,4 +1,6 @@
-#[derive(Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct TreeConfig {
     #[allow(dead_code)]
     n_root: usize,

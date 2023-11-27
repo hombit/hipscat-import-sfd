@@ -1,4 +1,5 @@
 use numpy::ndarray::NdFloat;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 pub(crate) trait MergeStates {
@@ -11,7 +12,7 @@ pub(crate) trait StateIsValid {
     fn state_is_valid(&self, state: &Self::State) -> bool;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MinMaxMeanState<T> {
     pub(crate) min: T,
     pub(crate) max: T,
@@ -52,7 +53,7 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct MinMaxMeanStateMerger<T> {
     phantom: PhantomData<T>,
 }
@@ -94,7 +95,7 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct MinMaxMeanStateValidator<T> {
     threshold: T,
 }
@@ -106,6 +107,10 @@ where
     pub(crate) fn new(threshold: T) -> Self {
         assert!(threshold >= T::zero());
         Self { threshold }
+    }
+
+    pub(crate) fn threshold(&self) -> T {
+        self.threshold
     }
 }
 
@@ -125,7 +130,7 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct StateBuilder<Merger, Validator> {
     pub(crate) merger: Merger,
     pub(crate) validator: Validator,

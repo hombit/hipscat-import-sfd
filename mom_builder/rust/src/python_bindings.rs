@@ -9,7 +9,8 @@ use numpy::ndarray::{Array1 as NdArray, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{dtype, PyArray1, PyUntypedArray};
 use pyo3::prelude::*;
-use pyo3::types::PyIterator;
+use pyo3::types::{PyBytes, PyIterator};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::iter::once;
@@ -147,6 +148,7 @@ where
     Ok(output)
 }
 
+#[derive(Serialize, Deserialize)]
 struct GenericMomBuilder<T> {
     intermediate_norder: usize,
     max_norder: usize,
@@ -307,6 +309,7 @@ where
     }
 }
 
+#[derive(Serialize, Deserialize)]
 #[pyclass(name = "MOMBuilder")]
 struct MomBuilder {
     inner_f32: GenericMomBuilder<f32>,
@@ -444,6 +447,37 @@ impl MomBuilder {
                 "No subtrees were built, please build at least one subtree",
             )),
         }
+    }
+
+    // pickle stuff
+    fn __getnewargs__(&self) -> (usize, usize, f64) {
+        (
+            self.inner_f64.max_norder,
+            self.inner_f64.intermediate_norder,
+            self.inner_f64.state_builder.validator.threshold(),
+        )
+    }
+
+    fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+        let vec_bytes =
+            serde_pickle::to_vec(&self, serde_pickle::SerOptions::new()).map_err(|err| {
+                pyo3::exceptions::PyException::new_err(format!(
+                    "Cannot pickle MOMBuilder: {}",
+                    err.to_string()
+                ))
+            })?;
+        Ok(PyBytes::new(py, &vec_bytes))
+    }
+
+    fn __setstate__<'py>(&mut self, state: &'py PyBytes) -> PyResult<()> {
+        *self = serde_pickle::from_slice(state.as_bytes(), serde_pickle::DeOptions::new())
+            .map_err(|err| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "Cannot unpickle MOMBuilder: {}",
+                    err.to_string()
+                ))
+            })?;
+        Ok(())
     }
 }
 
