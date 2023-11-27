@@ -1,4 +1,27 @@
-/// Simple Python module to build Multi-order healpix maps.
+/// Simple Rust crate and Python extension module to build multi-order healpix maps.
+///
+/// The Rust part of the crate provides a set of tools for bottom-top tree building.
+/// For a given balanced tree with fixed number of children per node,
+/// the crate provides tools to merge leaves to their parent nodes recursively, see
+/// [crate::build_tree] module. The merge rules are defined by the user, see [state] module
+/// for the details.
+///
+/// Trees could be merged in a streaming fashion, i.e. the user can provide an iterator over the
+/// leaves values.
+///
+/// Another notable feature is that currently we support "multi-root trees", i.e. a forest of
+/// independent trees with the same structure and maximum depth (which we called `max_norder`
+/// adopting [healpix](https://healpix.jpl.nasa.gov) terminology). See [tree_config] for the
+/// tree specification.
+///
+/// Currently, the only type of the leaf state is implemented, [state::MinMaxMeanState],
+/// which is accompained by a couple of merge rules, [state::MinMaxMeanStateMerger] and
+/// [state::MinMaxMeanStateValidator].
+///
+/// The Python part of the crate provides a Python extension module, see [python_bindings] for the
+/// details. The module implements building of healpix maps (twelve trees with four children per
+/// node). The Python module is supposed to be built with [maturin](https://maturin.rs) and has
+/// a small, but important part written in Python.
 ///
 /// TODO:
 /// 1. Add more tests
@@ -12,7 +35,7 @@
 mod build_tree;
 mod error;
 mod exclusive_option;
-mod norder_tiles;
+mod norder_leaves;
 mod python_bindings;
 mod state;
 mod tree;

@@ -211,7 +211,7 @@ where
     }
 
     fn max_norder_index_offset(&self, subtree_index: usize) -> usize {
-        subtree_index * self.subtree_config.max_norder_ntiles()
+        subtree_index * self.subtree_config.max_norder_nleaves()
     }
 
     fn build_subtree<'py>(
@@ -333,7 +333,7 @@ impl MomBuilder {
 
     #[getter]
     fn subtree_ntiles(&self) -> usize {
-        self.inner_f32.top_tree_config.max_norder_ntiles()
+        self.inner_f32.top_tree_config.max_norder_nleaves()
     }
 
     fn subtree_maxnorder_indexes<'py>(
@@ -341,7 +341,7 @@ impl MomBuilder {
         py: Python<'py>,
         subtree_index: usize,
     ) -> PyResult<&'py PyArray1<usize>> {
-        if subtree_index >= self.inner_f32.top_tree_config.max_norder_ntiles() {
+        if subtree_index >= self.inner_f32.top_tree_config.max_norder_nleaves() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "subtree_index is out of range",
             ));
@@ -350,7 +350,7 @@ impl MomBuilder {
 
         let output = PyArray1::from_vec(
             py,
-            (offset..offset + self.inner_f32.subtree_config.max_norder_ntiles())
+            (offset..offset + self.inner_f32.subtree_config.max_norder_nleaves())
                 .map(|i| i)
                 .collect(),
         );

@@ -1,7 +1,9 @@
 //! [Option] reimplementation with [PartialEq] implementation to make [None] variants distinct
 
 /// Naive [Option] reimplementation with [PartialEq] implementation to make [None] variants
-/// to be non-equal (exclusive)
+/// to be non-equal (exclusive).
+///
+/// We use it to make sure that errors are not being grouped and the very first error is returned.
 pub(crate) enum ExclusiveOption<T> {
     Some(T),
     None,

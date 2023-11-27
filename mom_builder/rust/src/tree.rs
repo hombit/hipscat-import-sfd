@@ -1,4 +1,10 @@
-use crate::norder_tiles::NorderTiles;
+//! Tree and related types.
 
-pub(crate) type Tree<S> = Vec<NorderTiles<S>>;
-pub(crate) type TreeMutRef<'a, S> = &'a mut [NorderTiles<S>];
+use crate::norder_leaves::NorderLeaves;
+
+/// Tree is a vector of [NorderLeaves] representing leaves at a given depth. Index denotes the norder
+/// (depth) of the tree.
+pub(crate) type Tree<S> = Vec<NorderLeaves<S>>;
+
+/// Mutable reference to a tree.
+pub(crate) type TreeMutRef<'a, S> = &'a mut [NorderLeaves<S>];
