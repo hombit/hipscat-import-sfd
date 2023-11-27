@@ -150,10 +150,10 @@ where
 
 #[derive(Serialize, Deserialize)]
 struct GenericMomBuilder<T> {
-    intermediate_norder: usize,
+    subtree_norder: usize,
     max_norder: usize,
-    intermediate_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
-    intermediate_tree_config: TreeConfig,
+    subtree_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
+    subtree_config: TreeConfig,
     top_tree_config: TreeConfig,
     state_builder: StateBuilder<MinMaxMeanStateMerger<T>, MinMaxMeanStateValidator<T>>,
 }
@@ -163,10 +163,10 @@ where
     T: NdFloat + numpy::Element,
     MinMaxMeanState<T>: Into<T>,
 {
-    fn new(max_norder: usize, intermediate_norder: usize, threshold: T) -> PyResult<Self> {
-        if intermediate_norder > max_norder {
+    fn new(max_norder: usize, subtree_norder: usize, threshold: T) -> PyResult<Self> {
+        if subtree_norder > max_norder {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "intermediate_norder must be less than or equal to max_norder",
+                "subtree_norder must be less than or equal to max_norder",
             ));
         }
 
@@ -176,15 +176,11 @@ where
         );
 
         Ok(Self {
-            intermediate_states: RwLock::new(BTreeMap::new()),
-            intermediate_norder,
+            subtree_states: RwLock::new(BTreeMap::new()),
+            subtree_norder,
             max_norder,
-            intermediate_tree_config: TreeConfig::new(
-                1usize,
-                4usize,
-                max_norder - intermediate_norder,
-            ),
-            top_tree_config: TreeConfig::new(12usize, 4usize, intermediate_norder),
+            subtree_config: TreeConfig::new(1usize, 4usize, max_norder - subtree_norder),
+            top_tree_config: TreeConfig::new(12usize, 4usize, subtree_norder),
             state_builder,
         })
     }
@@ -214,21 +210,21 @@ where
             .collect()
     }
 
-    fn max_norder_index_offset(&self, intermediate_index: usize) -> usize {
-        intermediate_index * self.intermediate_tree_config.max_norder_ntiles()
+    fn max_norder_index_offset(&self, subtree_index: usize) -> usize {
+        subtree_index * self.subtree_config.max_norder_ntiles()
     }
 
     fn build_subtree<'py>(
         &self,
         py: Python<'py>,
-        intermediate_index: usize,
+        subtree_index: usize,
         a: &'py PyArray1<T>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
         if self
-            .intermediate_states
+            .subtree_states
             .read()
             .expect("Cannot lock states storage for read")
-            .contains_key(&intermediate_index)
+            .contains_key(&subtree_index)
         {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "State with this index already exists",
@@ -237,7 +233,7 @@ where
 
         // We need to build a subtree with a single root node, we will accumulate all the nodes later
         // Current subtree has an offset in indexes on the deepest level (maximum norder)
-        let index_offset = self.max_norder_index_offset(intermediate_index);
+        let index_offset = self.max_norder_index_offset(subtree_index);
 
         let py_ro = a.readonly();
         let array = py_ro.as_array();
@@ -249,11 +245,7 @@ where
                 .map(|(relative_index, &x)| -> Result<_, Infallible> {
                     Ok((index_offset + relative_index, MinMaxMeanState::new(x)))
                 });
-        let mut tree = build_tree(
-            self.state_builder,
-            self.intermediate_tree_config.clone(),
-            it_states,
-        )?;
+        let mut tree = build_tree(self.state_builder, self.subtree_config.clone(), it_states)?;
 
         // Extract root node from the tree, it should have at most one state
         let root_tiles = tree.remove(0);
@@ -261,18 +253,18 @@ where
             0 => None,
             1 => {
                 let (indexes, states) = root_tiles.into_tuple();
-                assert_eq!(indexes[0], intermediate_index);
+                assert_eq!(indexes[0], subtree_index);
                 Some(states[0])
             }
             _ => panic!("Root node should have at most one state"),
         };
-        self.intermediate_states
+        self.subtree_states
             .write()
             .expect("Cannot lock states storage for write")
-            .insert(intermediate_index, state);
+            .insert(subtree_index, state);
 
         // Return the rest of the subtree
-        Ok(self.tree_to_python(py, tree, self.intermediate_norder + 1))
+        Ok(self.tree_to_python(py, tree, self.subtree_norder + 1))
     }
 
     fn build_top_tree<'py>(
@@ -280,7 +272,7 @@ where
         py: Python<'py>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
         if self
-            .intermediate_states
+            .subtree_states
             .read()
             .expect("Cannot lock states storage for read")
             .keys()
@@ -288,13 +280,13 @@ where
             .any(|(i, index)| *index != i)
         {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "Intermediate tiles are not contiguous",
+                "Subtree tiles are not contiguous",
             ));
         }
 
         let states = std::mem::take(
             &mut *self
-                .intermediate_states
+                .subtree_states
                 .write()
                 .expect("Cannot lock states storage for write"),
         );
@@ -319,10 +311,10 @@ struct MomBuilder {
 #[pymethods]
 impl MomBuilder {
     #[new]
-    fn __new__(max_norder: usize, intermediate_norder: usize, threshold: f64) -> PyResult<Self> {
+    fn __new__(max_norder: usize, subtree_norder: usize, threshold: f64) -> PyResult<Self> {
         let inner_f32 =
-            GenericMomBuilder::<f32>::new(max_norder, intermediate_norder, threshold as f32)?;
-        let inner_f64 = GenericMomBuilder::<f64>::new(max_norder, intermediate_norder, threshold)?;
+            GenericMomBuilder::<f32>::new(max_norder, subtree_norder, threshold as f32)?;
+        let inner_f64 = GenericMomBuilder::<f64>::new(max_norder, subtree_norder, threshold)?;
         Ok(Self {
             inner_f32,
             inner_f64,
@@ -330,8 +322,8 @@ impl MomBuilder {
     }
 
     #[getter]
-    fn intermediate_norder(&self) -> usize {
-        self.inner_f32.intermediate_norder
+    fn subtree_norder(&self) -> usize {
+        self.inner_f32.subtree_norder
     }
 
     #[getter]
@@ -340,25 +332,25 @@ impl MomBuilder {
     }
 
     #[getter]
-    fn intermediate_ntiles(&self) -> usize {
+    fn subtree_ntiles(&self) -> usize {
         self.inner_f32.top_tree_config.max_norder_ntiles()
     }
 
     fn subtree_maxnorder_indexes<'py>(
         &self,
         py: Python<'py>,
-        intermediate_index: usize,
+        subtree_index: usize,
     ) -> PyResult<&'py PyArray1<usize>> {
-        if intermediate_index >= self.inner_f32.top_tree_config.max_norder_ntiles() {
+        if subtree_index >= self.inner_f32.top_tree_config.max_norder_ntiles() {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "intermediate_index is out of range",
+                "subtree_index is out of range",
             ));
         }
-        let offset = self.inner_f32.max_norder_index_offset(intermediate_index);
+        let offset = self.inner_f32.max_norder_index_offset(subtree_index);
 
         let output = PyArray1::from_vec(
             py,
-            (offset..offset + self.inner_f32.intermediate_tree_config.max_norder_ntiles())
+            (offset..offset + self.inner_f32.subtree_config.max_norder_ntiles())
                 .map(|i| i)
                 .collect(),
         );
@@ -368,7 +360,7 @@ impl MomBuilder {
     fn build_subtree<'py>(
         &self,
         py: Python<'py>,
-        intermediate_index: usize,
+        subtree_index: usize,
         a: &'py PyUntypedArray,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
         if a.ndim() != 1 {
@@ -383,7 +375,7 @@ impl MomBuilder {
             let a = a.downcast::<PyArray1<f32>>()?;
             if self
                 .inner_f64
-                .intermediate_states
+                .subtree_states
                 .read()
                 .expect("Cannot lock f64 state storage for read")
                 .len()
@@ -393,12 +385,12 @@ impl MomBuilder {
                     "Got f32 array, but previously f64 array was processed",
                 ));
             }
-            self.inner_f32.build_subtree(py, intermediate_index, a)
+            self.inner_f32.build_subtree(py, subtree_index, a)
         } else if element_type.is_equiv_to(dtype::<f64>(py)) {
             let a = a.downcast::<PyArray1<f64>>()?;
             if self
                 .inner_f32
-                .intermediate_states
+                .subtree_states
                 .read()
                 .expect("Cannot lock f32 state storage for read")
                 .len()
@@ -408,7 +400,7 @@ impl MomBuilder {
                     "Got f64 array, but previously f32 array was processed",
                 ));
             }
-            self.inner_f64.build_subtree(py, intermediate_index, a)
+            self.inner_f64.build_subtree(py, subtree_index, a)
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
                 "Input array's dtype must be f32 or f64",
@@ -422,14 +414,14 @@ impl MomBuilder {
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
         let f32_non_empty = self
             .inner_f32
-            .intermediate_states
+            .subtree_states
             .read()
             .expect("Cannot lock f32 state storage for read")
             .len()
             > 0;
         let f64_non_empty = self
             .inner_f64
-            .intermediate_states
+            .subtree_states
             .read()
             .expect("Cannot lock f64 state storage for read")
             .len()
@@ -453,7 +445,7 @@ impl MomBuilder {
     fn __getnewargs__(&self) -> (usize, usize, f64) {
         (
             self.inner_f64.max_norder,
-            self.inner_f64.intermediate_norder,
+            self.inner_f64.subtree_norder,
             self.inner_f64.state_builder.validator.threshold(),
         )
     }
