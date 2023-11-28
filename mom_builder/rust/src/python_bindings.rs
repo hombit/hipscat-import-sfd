@@ -16,6 +16,24 @@ use std::convert::Infallible;
 use std::iter::once;
 use std::sync::RwLock;
 
+/// Builds multi-order healpix maps from an array of leaf values
+///
+/// Parameters
+/// ----------
+/// a : numpy.ndarray of float32 or float64
+///     Input array of leaf values at the maximum healpix norder. It must
+/// max_norder : int
+///     Maximum depth of the healpix tree.
+/// threshold : float
+///     When merging leaf states to their parent nodes, the relative difference
+///     between minimum and maximum values is checked against this threshold.
+///     Must be non-negative.
+///
+/// Returns
+/// -------
+/// list of (np.ndarray of uint64, np.ndarray of float32 or float64)
+///     List of (indexes, values) pairs, a pair per norder.
+///
 #[pyfunction(name = "mom_from_array")]
 fn py_mom_from_array<'py>(
     py: Python<'py>,
@@ -61,6 +79,29 @@ where
     mom_from_it(py, it, max_norder, threshold).expect("Should not fail with infallible error")
 }
 
+/// Builds multi-order healpix maps from an iterator of leaf values.
+///
+/// It is a variant of `mom_from_array` which accepts an iterator
+/// of leaf value batches instead of an array. It is useful when
+/// the input array is too large to fit into memory.
+///
+/// Parameters
+/// ----------
+/// it : iterator of numpy.ndarray of float32 or float64
+///     Iterator of batches of leaf values at the maximum healpix norder.
+///     The batch size is not limited, but it is recommended to use batches
+///     large enough to make the tree building efficient.
+/// max_norder : int
+///     Maximum depth of the healpix tree.
+/// threshold : float
+///     When merging leaf states to their parent nodes, the relative difference
+///     between minimum and maximum values is checked against this threshold.
+///     Must be non-negative.
+///
+/// Returns
+/// -------
+/// list of (np.ndarray of uint64, np.ndarray of float32 or float64)
+///     List of (indexes, values) pairs, a pair per norder.
 #[pyfunction(name = "mom_from_batch_it")]
 fn py_mom_from_batch_it<'py>(
     py: Python<'py>,
@@ -148,6 +189,8 @@ where
     Ok(output)
 }
 
+/// A low-level two-step builder of multi-order healpix maps.
+///
 #[derive(Serialize, Deserialize)]
 struct GenericMomBuilder<T> {
     subtree_norder: usize,
