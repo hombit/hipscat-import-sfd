@@ -5,7 +5,7 @@ use crate::state::{
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
-use numpy::ndarray::{Array1 as NdArray, NdFloat};
+use numpy::ndarray::{Array1 as NdArray, ArrayView1 as NdArrayView, NdFloat};
 use numpy::IntoPyArray;
 use numpy::{dtype, PyArray1, PyUntypedArray};
 use pyo3::prelude::*;
@@ -152,6 +152,7 @@ where
 struct GenericMomBuilder<T> {
     subtree_norder: usize,
     max_norder: usize,
+    thread_safe: bool,
     subtree_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
     subtree_config: TreeConfig,
     top_tree_config: TreeConfig,
@@ -163,7 +164,12 @@ where
     T: NdFloat + numpy::Element,
     MinMaxMeanState<T>: Into<T>,
 {
-    fn new(max_norder: usize, subtree_norder: usize, threshold: T) -> PyResult<Self> {
+    fn new(
+        max_norder: usize,
+        subtree_norder: usize,
+        threshold: T,
+        thread_safe: bool,
+    ) -> PyResult<Self> {
         if subtree_norder > max_norder {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "subtree_norder must be less than or equal to max_norder",
@@ -179,10 +185,18 @@ where
             subtree_states: RwLock::new(BTreeMap::new()),
             subtree_norder,
             max_norder,
+            thread_safe,
             subtree_config: TreeConfig::new(1usize, 4usize, max_norder - subtree_norder),
             top_tree_config: TreeConfig::new(12usize, 4usize, subtree_norder),
             state_builder,
         })
+    }
+
+    fn subtree_states_is_empty(&self) -> bool {
+        self.subtree_states
+            .read()
+            .expect("Cannot lock states storage for read")
+            .is_empty()
     }
 
     fn tree_to_python<'py>(
@@ -198,13 +212,8 @@ where
                 let (indexes, values) = tiles.into_tuple();
                 (
                     norder + norder_offset,
-                    NdArray::from_vec(indexes).into_pyarray(py),
-                    values
-                        .into_iter()
-                        .map(|x| x.into())
-                        .collect::<NdArray<_>>()
-                        .into_pyarray(py)
-                        .as_untyped(),
+                    PyArray1::from_vec(py, indexes),
+                    PyArray1::from_iter(py, values.into_iter().map(|x| x.into())).as_untyped(),
                 )
             })
             .collect()
@@ -220,23 +229,44 @@ where
         subtree_index: usize,
         a: &'py PyArray1<T>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
-        if self
-            .subtree_states
-            .read()
-            .expect("Cannot lock states storage for read")
-            .contains_key(&subtree_index)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "State with this index already exists",
-            ));
-        }
+        py.allow_threads(|| {
+            if self
+                .subtree_states
+                .read()
+                .expect("Cannot lock states storage for read")
+                .contains_key(&subtree_index)
+            {
+                Err(pyo3::exceptions::PyValueError::new_err(
+                    "State with this index already exists",
+                ))
+            } else {
+                Ok(())
+            }
+        })?;
 
+        let py_ro = a.readonly();
+
+        // We have to introduce an overhead here to avoid double locking of the states storage
+        let tree = if self.thread_safe {
+            let owned_array = py_ro.to_owned_array();
+            py.allow_threads(|| self.build_subtree_impl(owned_array.view(), subtree_index))
+        } else {
+            let array_view = py_ro.as_array();
+            self.build_subtree_impl(array_view, subtree_index)
+        }?;
+
+        // Return the rest of the subtree
+        Ok(self.tree_to_python(py, tree, self.subtree_norder + 1))
+    }
+
+    fn build_subtree_impl(
+        &self,
+        array: NdArrayView<T>,
+        subtree_index: usize,
+    ) -> PyResult<Tree<MinMaxMeanState<T>>> {
         // We need to build a subtree with a single root node, we will accumulate all the nodes later
         // Current subtree has an offset in indexes on the deepest level (maximum norder)
         let index_offset = self.max_norder_index_offset(subtree_index);
-
-        let py_ro = a.readonly();
-        let array = py_ro.as_array();
 
         let it_states =
             array
@@ -263,39 +293,44 @@ where
             .expect("Cannot lock states storage for write")
             .insert(subtree_index, state);
 
-        // Return the rest of the subtree
-        Ok(self.tree_to_python(py, tree, self.subtree_norder + 1))
+        Ok(tree)
     }
 
     fn build_top_tree<'py>(
         &self,
         py: Python<'py>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
-        if self
-            .subtree_states
-            .read()
-            .expect("Cannot lock states storage for read")
-            .keys()
-            .enumerate()
-            .any(|(i, index)| *index != i)
-        {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Subtree tiles are not contiguous",
-            ));
-        }
-
-        let states = std::mem::take(
-            &mut *self
+        let tree = py.allow_threads(|| {
+            if self
                 .subtree_states
-                .write()
-                .expect("Cannot lock states storage for write"),
-        );
+                .read()
+                .expect("Cannot lock states storage for read")
+                .keys()
+                .enumerate()
+                .any(|(i, index)| *index != i)
+            {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Subtree tiles are not contiguous",
+                ));
+            }
 
-        let it_states = states.into_iter().filter_map(|(index, state)| {
-            state.map(|state| -> Result<_, Infallible> { Ok((index, state)) })
-        });
+            let states = std::mem::take(
+                &mut *self
+                    .subtree_states
+                    .write()
+                    .expect("Cannot lock states storage for write"),
+            );
 
-        let tree = build_tree(self.state_builder, self.top_tree_config.clone(), it_states)?;
+            let it_states = states.into_iter().filter_map(|(index, state)| {
+                state.map(|state| -> Result<_, Infallible> { Ok((index, state)) })
+            });
+
+            Ok(build_tree(
+                self.state_builder,
+                self.top_tree_config.clone(),
+                it_states,
+            )?)
+        })?;
 
         Ok(self.tree_to_python(py, tree, 0))
     }
@@ -311,10 +346,21 @@ struct MomBuilder {
 #[pymethods]
 impl MomBuilder {
     #[new]
-    fn __new__(max_norder: usize, subtree_norder: usize, threshold: f64) -> PyResult<Self> {
-        let inner_f32 =
-            GenericMomBuilder::<f32>::new(max_norder, subtree_norder, threshold as f32)?;
-        let inner_f64 = GenericMomBuilder::<f64>::new(max_norder, subtree_norder, threshold)?;
+    #[pyo3(signature = (max_norder, subtree_norder, threshold, *, thread_safe=true))]
+    fn __new__(
+        max_norder: usize,
+        subtree_norder: usize,
+        threshold: f64,
+        thread_safe: bool,
+    ) -> PyResult<Self> {
+        let inner_f32 = GenericMomBuilder::<f32>::new(
+            max_norder,
+            subtree_norder,
+            threshold as f32,
+            thread_safe,
+        )?;
+        let inner_f64 =
+            GenericMomBuilder::<f64>::new(max_norder, subtree_norder, threshold, thread_safe)?;
         Ok(Self {
             inner_f32,
             inner_f64,
@@ -372,34 +418,28 @@ impl MomBuilder {
         let element_type = a.dtype();
 
         if element_type.is_equiv_to(dtype::<f32>(py)) {
+            py.allow_threads(|| {
+                if self.inner_f64.subtree_states_is_empty() {
+                    Ok(())
+                } else {
+                    Err(pyo3::exceptions::PyValueError::new_err(
+                        "Got f32 array, but previously f64 array was processed",
+                    ))
+                }
+            })?;
             let a = a.downcast::<PyArray1<f32>>()?;
-            if self
-                .inner_f64
-                .subtree_states
-                .read()
-                .expect("Cannot lock f64 state storage for read")
-                .len()
-                > 0
-            {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Got f32 array, but previously f64 array was processed",
-                ));
-            }
             self.inner_f32.build_subtree(py, subtree_index, a)
         } else if element_type.is_equiv_to(dtype::<f64>(py)) {
+            py.allow_threads(|| {
+                if self.inner_f32.subtree_states_is_empty() {
+                    Ok(())
+                } else {
+                    Err(pyo3::exceptions::PyValueError::new_err(
+                        "Got f64 array, but previously f32 array was processed",
+                    ))
+                }
+            })?;
             let a = a.downcast::<PyArray1<f64>>()?;
-            if self
-                .inner_f32
-                .subtree_states
-                .read()
-                .expect("Cannot lock f32 state storage for read")
-                .len()
-                > 0
-            {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Got f64 array, but previously f32 array was processed",
-                ));
-            }
             self.inner_f64.build_subtree(py, subtree_index, a)
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
@@ -412,20 +452,8 @@ impl MomBuilder {
         &self,
         py: Python<'py>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
-        let f32_non_empty = self
-            .inner_f32
-            .subtree_states
-            .read()
-            .expect("Cannot lock f32 state storage for read")
-            .len()
-            > 0;
-        let f64_non_empty = self
-            .inner_f64
-            .subtree_states
-            .read()
-            .expect("Cannot lock f64 state storage for read")
-            .len()
-            > 0;
+        let f32_non_empty = py.allow_threads(|| !self.inner_f32.subtree_states_is_empty());
+        let f64_non_empty = py.allow_threads(|| !self.inner_f64.subtree_states_is_empty());
 
         match (f32_non_empty, f64_non_empty)
         {
