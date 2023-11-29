@@ -81,27 +81,26 @@ where
             });
 
         for (parent_index, group) in groups.into_iter() {
-            let states = group
-                .map(|result| result.map(|(_index, state)| state))
-                .collect::<Result<Vec<_>, E>>()?;
+            let (indexes, states) = {
+                let it = group.into_iter();
+                itertools::process_results(it, |iter| iter.unzip::<_, _, Vec<_>, Vec<_>>())?
+            };
             let parent_index = parent_index.expect("Error has been processed before");
 
-            if states.len() < self.config.n_children() {
-                continue;
-            }
             if states.len() > self.config.n_children() {
                 panic!("Too many states in one group, check if index is correct");
             }
 
-            // Run recursive merge
-            let merged = self.merge_states(subtree, &states, parent_index);
+            let merged = if states.len() == self.config.n_children() {
+                // Run recursive merge
+                self.merge_states(subtree, &states, parent_index)
+            } else {
+                false
+            };
 
             // If not merged then insert the states into the current norder, max_norder
             if !merged {
-                for (index, state) in (self.config.n_children() * parent_index
-                    ..self.config.n_children() * (parent_index + 1))
-                    .zip(states.into_iter())
-                {
+                for (index, state) in indexes.into_iter().zip(states.into_iter()) {
                     max_norder_leaves
                         .insert(index, state)
                         .expect("Tree insertion failed");
