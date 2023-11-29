@@ -11,6 +11,15 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
 
 [tool.maturin]
 python-source = "python"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
