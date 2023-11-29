@@ -189,11 +189,9 @@ where
     Ok(output)
 }
 
-/// A low-level two-step builder of multi-order healpix maps.
-///
 #[derive(Serialize, Deserialize)]
 struct GenericMomBuilder<T> {
-    subtree_norder: usize,
+    split_norder: usize,
     max_norder: usize,
     thread_safe: bool,
     subtree_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
@@ -209,13 +207,13 @@ where
 {
     fn new(
         max_norder: usize,
-        subtree_norder: usize,
+        split_norder: usize,
         threshold: T,
         thread_safe: bool,
     ) -> PyResult<Self> {
-        if subtree_norder > max_norder {
+        if split_norder > max_norder {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "subtree_norder must be less than or equal to max_norder",
+                "split_norder must be less than or equal to max_norder",
             ));
         }
 
@@ -226,11 +224,11 @@ where
 
         Ok(Self {
             subtree_states: RwLock::new(BTreeMap::new()),
-            subtree_norder,
+            split_norder,
             max_norder,
             thread_safe,
-            subtree_config: TreeConfig::new(1usize, 4usize, max_norder - subtree_norder),
-            top_tree_config: TreeConfig::new(12usize, 4usize, subtree_norder),
+            subtree_config: TreeConfig::new(1usize, 4usize, max_norder - split_norder),
+            top_tree_config: TreeConfig::new(12usize, 4usize, split_norder),
             state_builder,
         })
     }
@@ -299,7 +297,7 @@ where
         }?;
 
         // Return the rest of the subtree
-        Ok(self.tree_to_python(py, tree, self.subtree_norder + 1))
+        Ok(self.tree_to_python(py, tree, self.split_norder + 1))
     }
 
     fn build_subtree_impl(
@@ -344,17 +342,22 @@ where
         py: Python<'py>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
         let tree = py.allow_threads(|| {
-            if self
-                .subtree_states
-                .read()
-                .expect("Cannot lock states storage for read")
-                .keys()
-                .enumerate()
-                .any(|(i, index)| *index != i)
             {
-                return Err(pyo3::exceptions::PyValueError::new_err(
-                    "Subtree tiles are not contiguous",
-                ));
+                let states = self
+                    .subtree_states
+                    .read()
+                    .expect("Cannot lock states storage for read");
+
+                if states.len() != self.top_tree_config.max_norder_nleaves() {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "Not all subtrees are built",
+                    ));
+                }
+                if states.keys().enumerate().any(|(i, index)| *index != i) {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "Subtree tiles are not contiguous",
+                    ));
+                }
             }
 
             let states = std::mem::take(
@@ -379,6 +382,73 @@ where
     }
 }
 
+/// A low-level two-step builder of multi-order healpix maps.
+///
+/// The builder is supposed to be used in the following way:
+/// 1. Create a builder with `MOMBuilder` constructor.
+/// 2. Build all subtrees with `build_subtree()` method.
+///    Use `subtree_maxnorder_indexes()` method to get indexes of
+///    the subtree leaves on the maximum depth.
+/// 3. Build the top tree with `build_top_tree()` method.
+///
+///
+/// Note, that dtype of the input arrays must be the same for all subtrees,
+/// and all subtrees must be built before building the top tree.
+/// Consider to user `gen_mom_from_fn()` function, which wraps this class
+/// and provides a more convenient interface.
+///
+///   t   t                     0
+///   o   r      _______________|_________________
+///   p   e     /          |           |          \
+///       e    0           1           2          3
+///          / | | \    / | | \    / | | \   /  |  | \
+///  sub-   0 1  2 3   4  5 6  7  8 9 10 11 12 13 14 15
+///  trees |||||||||  |||||||||  |||||||||  |||||||||||
+///  ...   xxxxxxxxx  xxxxxxxxx  xxxxxxxxx  xxxxxxxxxxx
+///
+/// (1/12 of a healpix tree. split_norder=1, max_norder>2. We first build four
+///  subtrees, and then, if all four subtree roots are not empty and mergeable,
+///  we build the top tree.)
+///
+/// Parameters
+/// ----------
+/// max_norder : int
+///     Maximum depth of the healpix tree. It is the maximum norder of the
+///     whole tree, not of the subtrees.
+/// split_norder : int
+///     Maximum depth of the top tree. It is level of the tree where it is
+///     split into subtrees.
+/// threshold : float
+///     When merging leaf states to their parent nodes, the relative difference
+///     between minimum and maximum values is checked against this threshold.
+///     Must be non-negative.
+/// thread_safe : bool
+///     If True, the builder will use a thread-safe implementation. It forces
+///     copying of the input arrays to release GIL, so it could be a bit
+///     slower. If False, the builder will use a non-thread-safe
+///     implementation, which could make itself into a deadlock if used in
+///     a multithreaded environment.
+///
+/// Attributes
+/// ----------
+/// max_norder : int
+/// split_norder : int
+/// num_subtrees : int
+///     Number of subtrees, it is equal to the number of leaves in the top
+///     tree on its maximum depth.
+///
+/// Methods
+/// -------
+/// subtree_maxnorder_indexes(subtree_index)
+///     Returns indexes of the subtree leaves on the maximum depth.
+/// build_subtree(subtree_index, a)
+///     Builds a subtree from an array of leaf values. The array must
+///     correspond to indexes given by `subtree_maxnorder_indexes()`.
+///     Reurns a list of (norder, indexes, values) tuples.
+/// build_top_tree()
+///     Builds the top tree from subtrees. Returns a list of
+///     (norder, indexes, values) tuples.
+///
 #[derive(Serialize, Deserialize)]
 #[pyclass(name = "MOMBuilder")]
 struct MomBuilder {
@@ -389,42 +459,60 @@ struct MomBuilder {
 #[pymethods]
 impl MomBuilder {
     #[new]
-    #[pyo3(signature = (max_norder, subtree_norder, threshold, *, thread_safe=true))]
+    #[pyo3(signature = (max_norder, *, split_norder, threshold, thread_safe=true))]
     fn __new__(
         max_norder: usize,
-        subtree_norder: usize,
+        split_norder: usize,
         threshold: f64,
         thread_safe: bool,
     ) -> PyResult<Self> {
-        let inner_f32 = GenericMomBuilder::<f32>::new(
-            max_norder,
-            subtree_norder,
-            threshold as f32,
-            thread_safe,
-        )?;
+        let inner_f32 =
+            GenericMomBuilder::<f32>::new(max_norder, split_norder, threshold as f32, thread_safe)?;
         let inner_f64 =
-            GenericMomBuilder::<f64>::new(max_norder, subtree_norder, threshold, thread_safe)?;
+            GenericMomBuilder::<f64>::new(max_norder, split_norder, threshold, thread_safe)?;
         Ok(Self {
             inner_f32,
             inner_f64,
         })
     }
 
-    #[getter]
-    fn subtree_norder(&self) -> usize {
-        self.inner_f32.subtree_norder
-    }
-
+    /// Maximum depth of the healpix tree.
     #[getter]
     fn max_norder(&self) -> usize {
         self.inner_f32.max_norder
     }
 
+    /// Depth of the top tree.
     #[getter]
-    fn subtree_ntiles(&self) -> usize {
+    fn split_norder(&self) -> usize {
+        self.inner_f32.split_norder
+    }
+
+    /// Number of subtrees
+    ///
+    /// It is equal to the number of leaves in the top tree on its maximum
+    /// depth.
+    #[getter]
+    fn num_subtrees(&self) -> usize {
         self.inner_f32.top_tree_config.max_norder_nleaves()
     }
 
+    /// Returns healpix indexes of the subtree leaves on the maximum depth.
+    ///
+    /// It is supposed to be used to create an input array for
+    /// `build_subtree()`.
+    ///
+    /// Parameters
+    /// ----------
+    /// subtree_index : int
+    ///     Index of the subtree, in [0, num_subtrees).
+    ///
+    /// Returns
+    /// -------
+    /// numpy.ndarray of uint64
+    ///     Array of healpix indexes of the subtree leaves on the maximum
+    ///     norder.
+    ///
     fn subtree_maxnorder_indexes<'py>(
         &self,
         py: Python<'py>,
@@ -446,6 +534,28 @@ impl MomBuilder {
         Ok(output)
     }
 
+    /// Builds a subtree from an array of leaf values.
+    ///
+    /// This method builds a subtree, stores the root node state if exists
+    /// and returns the rest of the subtree otherwise.
+    ///
+    /// It must be called once per subtree, and the subtrees must be built
+    /// with `a` of the same dtype.
+    ///
+    /// Parameters
+    /// ----------
+    /// subtree_index : int
+    ///     Healpix index of the subtree root, in [0, num_subtrees).
+    /// a : numpy.ndarray of float32 or float64
+    ///     Leaf values at the maximum healpix norder. It must correspond
+    ///     to indexes given by `subtree_maxnorder_indexes()`.
+    ///
+    /// Returns
+    /// -------
+    /// list of (int, numpy.ndarray of uint64, numpy.ndarray of float32/64)
+    ///     List of (norder, indexes, values) tuples, a tuple per non-empty
+    ///     norder. The norder is absolute (not relative to the subtree).
+    ///
     fn build_subtree<'py>(
         &self,
         py: Python<'py>,
@@ -491,6 +601,15 @@ impl MomBuilder {
         }
     }
 
+    /// Builds the top tree from subtrees.
+    ///
+    /// It must be called after all subtrees are built with `build_subtree()`.
+    ///
+    /// Returns
+    /// -------
+    /// list of (int, numpy.ndarray of uint64, numpy.ndarray of float32/64)
+    ///     List of (norder, indexes, values) tuples, a tuple per non-empty
+    ///     norder.
     fn build_top_tree<'py>(
         &self,
         py: Python<'py>,
@@ -516,7 +635,7 @@ impl MomBuilder {
     fn __getnewargs__(&self) -> (usize, usize, f64) {
         (
             self.inner_f64.max_norder,
-            self.inner_f64.subtree_norder,
+            self.inner_f64.split_norder,
             self.inner_f64.state_builder.validator.threshold(),
         )
     }
