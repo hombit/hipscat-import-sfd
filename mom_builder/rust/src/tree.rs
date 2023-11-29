@@ -4,7 +4,7 @@ use crate::norder_leaves::NorderLeaves;
 
 /// Tree is a vector of [NorderLeaves] representing leaves at a given depth. Index denotes the norder
 /// (depth) of the tree.
-pub(crate) type Tree<S> = Vec<NorderLeaves<S>>;
+pub type Tree<S> = Vec<NorderLeaves<S>>;
 
 /// Mutable reference to a tree.
-pub(crate) type TreeMutRef<'a, S> = &'a mut [NorderLeaves<S>];
+pub type TreeMutRef<'a, S> = &'a mut [NorderLeaves<S>];

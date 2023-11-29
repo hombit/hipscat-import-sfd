@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 /// Trait for merging leaf states to their parent nodes.
-pub(crate) trait MergeStates {
+pub trait MergeStates {
     /// Type of the leaf state.
     type State: Sized;
 
@@ -25,7 +25,7 @@ pub(crate) trait MergeStates {
 }
 
 /// Trait for checking if the merged state is valid.
-pub(crate) trait StateIsValid {
+pub trait StateIsValid {
     /// Type of the leaf state.
     type State;
 
@@ -38,13 +38,13 @@ pub(crate) trait StateIsValid {
 /// It implements [Into] trait for [f32] and [f64], so it can be converted to its mean value.
 /// [From] trait for `T` which just assigns the given value to all three fields.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MinMaxMeanState<T> {
+pub struct MinMaxMeanState<T> {
     /// Minimum value.
-    pub(crate) min: T,
+    pub min: T,
     /// Maximum value.
-    pub(crate) max: T,
+    pub max: T,
     /// Mean value.
-    pub(crate) mean: T,
+    pub mean: T,
 }
 
 impl<T> MinMaxMeanState<T>
@@ -53,7 +53,7 @@ where
 {
     /// Creates a new [MinMaxMeanState] with the given value, which is used as minimum, maximum and
     /// mean.
-    pub(crate) fn new(value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self {
             min: value,
             max: value,
@@ -85,12 +85,12 @@ where
 
 /// Merges leaf states by taking minimum and maximum of the states and calculating the mean value.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct MinMaxMeanStateMerger<T> {
+pub struct MinMaxMeanStateMerger<T> {
     phantom: PhantomData<T>,
 }
 
 impl<T> MinMaxMeanStateMerger<T> {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             phantom: PhantomData,
         }
@@ -132,7 +132,7 @@ where
 ///
 /// Basically it checks if `abs(max - min) / max <= threshold`, but with some edge-case handling.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct MinMaxMeanStateValidator<T> {
+pub struct MinMaxMeanStateValidator<T> {
     threshold: T,
 }
 
@@ -143,13 +143,13 @@ where
     /// Creates a new [MinMaxMeanStateValidator] with the given threshold.
     ///
     /// The threshold must be non-negative, otherwise the method panics.
-    pub(crate) fn new(threshold: T) -> Self {
+    pub fn new(threshold: T) -> Self {
         assert!(threshold >= T::zero());
         Self { threshold }
     }
 
     /// Returns the threshold.
-    pub(crate) fn threshold(&self) -> T {
+    pub fn threshold(&self) -> T {
         self.threshold
     }
 }
@@ -176,11 +176,11 @@ where
 
 /// State merge rules.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct StateBuilder<Merger, Validator> {
+pub struct StateBuilder<Merger, Validator> {
     /// State merger, implements [MergeStates] trait.
-    pub(crate) merger: Merger,
+    pub merger: Merger,
     /// State validator, implements [StateIsValid] trait.
-    pub(crate) validator: Validator,
+    pub validator: Validator,
 }
 
 impl<S, Merger, Validator> StateBuilder<Merger, Validator>
@@ -189,7 +189,7 @@ where
     Validator: StateIsValid<State = S>,
 {
     /// Creates a new [StateBuilder] with the given merger and validator.
-    pub(crate) fn new(merger: Merger, validator: Validator) -> Self {
+    pub fn new(merger: Merger, validator: Validator) -> Self {
         Self { merger, validator }
     }
 }

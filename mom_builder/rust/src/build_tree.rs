@@ -3,8 +3,8 @@
 //! ### Index convention
 //!
 //! ```text
-//!         __0__          __1__
-//!        /     \        /     \
+//!        __0__           __1__
+//!       /     \         /     \
 //!      0       1       2      3
 //!     / \     / \     / \    / \
 //!    0   1   2  3    4  5    6  7
@@ -25,8 +25,8 @@
 //! 1. Tree builder consumes an iterator over the leaf states. Some of the leaves could be missing,
 //!   but the iterator must be sorted by strictly increasing index. If the children group is
 //!   complete, the builder tries to merge the states into the parent node. If the group is
-//!   incomplete or the merge state is invalid (see [state::StateIsValid]), the states are inserted
-//!   into the tree as is.
+//!   incomplete or the merge state is invalid (see [crate::state::StateIsValid]), the states are
+//!   inserted into the tree as is.
 //! 2. If the merge is successful, the builder adds the merged state to the parent node.
 //! 3. Check if the parent node is a last child of the grandparent node. For example, for the sketch
 //!    above, the middle level nodes 1 and 3 are last children of the root nodes 0 and 1. If we have
@@ -48,9 +48,9 @@ use itertools::Itertools;
 /// The merge rules are defined by the user, see [crate::state] module for the details. For now it
 /// is exclusively used by [build_tree] function.
 #[derive(Clone)]
-pub(crate) struct TreeBuilder<Merger, Validator> {
-    pub(crate) state_builder: StateBuilder<Merger, Validator>,
-    pub(crate) config: TreeConfig,
+pub struct TreeBuilder<Merger, Validator> {
+    pub state_builder: StateBuilder<Merger, Validator>,
+    pub config: TreeConfig,
 }
 
 impl<S, Merger, Validator> TreeBuilder<Merger, Validator>
@@ -209,7 +209,7 @@ where
 /// Returns:
 /// - [Ok] with a [Tree] object, if all the states are valid, and [Err] if one of the states has
 ///   failed. The function never returns [Err] for its own errors, but could panic.
-pub(crate) fn build_tree<S, Merger, Validator, E>(
+pub fn build_tree<S, Merger, Validator, E>(
     state_builder: StateBuilder<Merger, Validator>,
     tree_config: TreeConfig,
     max_norder_states: impl IntoIterator<Item = Result<(usize, S), E>>,

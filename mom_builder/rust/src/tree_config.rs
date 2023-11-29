@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Actually, it is a configuration of the forest of trees, but for simplicity we call it
 /// a multi-root tree.
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TreeConfig {
+pub struct TreeConfig {
     /// Number of roots.
     #[allow(dead_code)]
     n_root: usize,
@@ -24,7 +24,7 @@ pub(crate) struct TreeConfig {
 impl TreeConfig {
     /// Creates a new [TreeConfig] with  the given number of roots, number of children per node and
     /// maximum depth.
-    pub(crate) fn new(
+    pub fn new(
         n_root: impl Into<usize>,
         n_children: impl Into<usize>,
         max_norder: impl Into<usize>,
@@ -43,17 +43,17 @@ impl TreeConfig {
     }
 
     /// Returns the number of roots.
-    pub(crate) fn n_children(&self) -> usize {
+    pub fn n_children(&self) -> usize {
         self.n_children
     }
 
     /// Returns the number of children per node.
-    pub(crate) fn max_norder(&self) -> usize {
+    pub fn max_norder(&self) -> usize {
         self.max_norder
     }
 
     /// Returns the maximum number of leaves the tree can have.
-    pub(crate) fn max_norder_nleaves(&self) -> usize {
+    pub fn max_norder_nleaves(&self) -> usize {
         self.max_norder_nleaves
     }
 }

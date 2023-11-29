@@ -2,7 +2,7 @@
 
 /// Error enum for the mom_builder crate.
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Index is invalid")]
     IndexError,
 }
