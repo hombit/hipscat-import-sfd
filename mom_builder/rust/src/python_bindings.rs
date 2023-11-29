@@ -11,7 +11,7 @@ use numpy::{dtype, PyArray1, PyUntypedArray};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyIterator};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::iter::once;
 use std::sync::RwLock;
@@ -360,6 +360,7 @@ where
                 }
             }
 
+            // Large memory allocation, we need to optimize it
             let states = std::mem::take(
                 &mut *self
                     .subtree_states
@@ -450,7 +451,7 @@ where
 ///     (norder, indexes, values) tuples.
 ///
 #[derive(Serialize, Deserialize)]
-#[pyclass(name = "MOMBuilder")]
+#[pyclass(name = "MOMBuilder", module = "mom_builder.mom_builder")]
 struct MomBuilder {
     inner_f32: GenericMomBuilder<f32>,
     inner_f64: GenericMomBuilder<f64>,
@@ -632,12 +633,24 @@ impl MomBuilder {
     }
 
     // pickle stuff
-    fn __getnewargs__(&self) -> (usize, usize, f64) {
-        (
-            self.inner_f64.max_norder,
-            self.inner_f64.split_norder,
-            self.inner_f64.state_builder.validator.threshold(),
-        )
+    fn __getnewargs_ex__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> ((usize,), HashMap<&'static str, PyObject>) {
+        let args = (self.inner_f64.max_norder,);
+        let kwargs = [
+            ("split_norder", self.inner_f64.split_norder.into_py(py)),
+            (
+                "threshold",
+                self.inner_f64
+                    .state_builder
+                    .validator
+                    .threshold()
+                    .into_py(py),
+            ),
+            ("thread_safe", self.inner_f64.thread_safe.into_py(py)),
+        ];
+        (args, kwargs.into_iter().collect())
     }
 
     fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
