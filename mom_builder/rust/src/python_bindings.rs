@@ -479,6 +479,8 @@ where
 /// build_top_tree()
 ///     Builds the top tree from subtrees. Returns a list of
 ///     (norder, indexes, values) tuples.
+/// extend(other)
+///     Extends the builder with another builder. That builder will be cleared
 ///
 #[derive(Serialize, Deserialize)]
 #[pyclass(name = "MOMBuilder", module = "mom_builder.mom_builder")]
