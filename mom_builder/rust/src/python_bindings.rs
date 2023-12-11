@@ -381,6 +381,36 @@ where
 
         Ok(self.tree_to_python(py, tree, 0))
     }
+
+    fn extend(&self, other: &Self) -> PyResult<()> {
+        if other.subtree_states_is_empty() {
+            // Nothing to merge with
+            return Ok(());
+        }
+
+        let mut states = self
+            .subtree_states
+            .write()
+            .expect("Cannot lock states storage for write");
+
+        // We are cleaning the other's states storage here
+        let other_states = std::mem::take(
+            &mut *other
+                .subtree_states
+                .write()
+                .expect("Cannot lock states storage for read"),
+        );
+
+        for (index, state) in other_states.into_iter() {
+            if let Some(_) = states.insert(index, state) {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "State with index {index} already exists",
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// A low-level two-step builder of multi-order healpix maps.
@@ -457,11 +487,27 @@ struct MomBuilder {
     inner_f64: GenericMomBuilder<f64>,
 }
 
+#[derive(Clone, Copy)]
 enum MomBuilderInnerType {
     F32,
     F64,
     Unknown,
     Invalid,
+}
+
+impl MomBuilderInnerType {
+    fn mergeable_with_other(&self, other: &MomBuilderInnerType) -> Option<bool> {
+        match (self, other) {
+            (Self::F32, Self::F32) => Some(true),
+            (Self::F64, Self::F64) => Some(true),
+            (Self::F32, Self::F64) => Some(false),
+            (Self::F64, Self::F32) => Some(false),
+            (Self::F32 | Self::F64 | Self::Unknown, Self::Unknown) => Some(true),
+            (Self::Unknown, Self::F32 | Self::F64) => Some(true),
+            (Self::Invalid, _) => None,
+            (_, Self::Invalid) => None,
+        }
+    }
 }
 
 impl MomBuilder {
@@ -649,6 +695,55 @@ impl MomBuilder {
                 "MOMBuilder was used with both f32 and f64 arrays, please rebuild with the same dtype",
             )),
         }
+    }
+
+    /// Extends from other MOMBuilder, clearing the other MOMBuilder.
+    ///
+    /// Parameters
+    /// ----------
+    /// other : MOMBuilder
+    ///     MOMBuilder to extend from. It must have the same max_norder, split_norder, threshold,
+    ///     and be built from the data of the same dtype.
+    ///
+    /// Returns
+    /// -------
+    /// None
+    fn extend(&self, py: Python, other: &Self) -> PyResult<()> {
+        if self.max_norder() != other.max_norder() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_norder must be the same",
+            ));
+        }
+        if self.split_norder() != other.split_norder() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "split_norder must be the same",
+            ));
+        }
+
+        let slf_element_type = py.allow_threads(|| self.inner_type());
+        match slf_element_type.mergeable_with_other(&py.allow_threads(|| other.inner_type())) {
+            Some(true) => {}
+            Some(false) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "dtype must be the same",
+                ));
+            }
+            None => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "One of the MOMBuilder is invalid",
+                ));
+            }
+        }
+
+        py.allow_threads(|| -> PyResult<()> {
+            // We merge both inner states for convinience, we have actually checked that
+            // they are mergeable.
+            self.inner_f32.extend(&other.inner_f32)?;
+            self.inner_f64.extend(&other.inner_f64)?;
+            Ok(())
+        })?;
+
+        Ok(())
     }
 
     // pickle stuff
