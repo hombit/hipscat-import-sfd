@@ -457,6 +457,27 @@ struct MomBuilder {
     inner_f64: GenericMomBuilder<f64>,
 }
 
+enum MomBuilderInnerType {
+    F32,
+    F64,
+    Unknown,
+    Invalid,
+}
+
+impl MomBuilder {
+    fn inner_type(&self) -> MomBuilderInnerType {
+        match (
+            !self.inner_f32.subtree_states_is_empty(),
+            !self.inner_f64.subtree_states_is_empty(),
+        ) {
+            (true, false) => MomBuilderInnerType::F32,
+            (false, true) => MomBuilderInnerType::F64,
+            (false, false) => MomBuilderInnerType::Unknown,
+            (true, true) => MomBuilderInnerType::Invalid,
+        }
+    }
+}
+
 #[pymethods]
 impl MomBuilder {
     #[new]
@@ -569,30 +590,31 @@ impl MomBuilder {
             ));
         }
 
-        let element_type = a.dtype();
+        let a_element_type = a.dtype();
+        let slf_element_type = py.allow_threads(|| self.inner_type());
 
-        if element_type.is_equiv_to(dtype::<f32>(py)) {
-            py.allow_threads(|| {
-                if self.inner_f64.subtree_states_is_empty() {
-                    Ok(())
-                } else {
-                    Err(pyo3::exceptions::PyValueError::new_err(
-                        "Got f32 array, but previously f64 array was processed",
-                    ))
-                }
-            })?;
+        if a_element_type.is_equiv_to(dtype::<f32>(py)) {
+            match slf_element_type {
+                MomBuilderInnerType::F32 | MomBuilderInnerType::Unknown => {},
+                MomBuilderInnerType::F64 => return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Got f32 array, but previously f64 array was processed",
+                )),
+                MomBuilderInnerType::Invalid => return Err(pyo3::exceptions::PyValueError::new_err(
+                    "MOMBuilder was used with both f32 and f64 arrays, please rebuild with the same dtype",
+                )),
+            };
             let a = a.downcast::<PyArray1<f32>>()?;
             self.inner_f32.build_subtree(py, subtree_index, a)
-        } else if element_type.is_equiv_to(dtype::<f64>(py)) {
-            py.allow_threads(|| {
-                if self.inner_f32.subtree_states_is_empty() {
-                    Ok(())
-                } else {
-                    Err(pyo3::exceptions::PyValueError::new_err(
-                        "Got f64 array, but previously f32 array was processed",
-                    ))
-                }
-            })?;
+        } else if a_element_type.is_equiv_to(dtype::<f64>(py)) {
+            match slf_element_type {
+                MomBuilderInnerType::F64 | MomBuilderInnerType::Unknown => {},
+                MomBuilderInnerType::F32 => return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Got f64 array, but previously f32 array was processed",
+                )),
+                MomBuilderInnerType::Invalid => return Err(pyo3::exceptions::PyValueError::new_err(
+                    "MOMBuilder was used with both f32 and f64 arrays, please rebuild with the same dtype",
+                )),
+            };
             let a = a.downcast::<PyArray1<f64>>()?;
             self.inner_f64.build_subtree(py, subtree_index, a)
         } else {
@@ -615,19 +637,16 @@ impl MomBuilder {
         &self,
         py: Python<'py>,
     ) -> PyResult<Vec<(usize, &'py PyArray1<usize>, &'py PyUntypedArray)>> {
-        let f32_non_empty = py.allow_threads(|| !self.inner_f32.subtree_states_is_empty());
-        let f64_non_empty = py.allow_threads(|| !self.inner_f64.subtree_states_is_empty());
+        let slf_element_type = py.allow_threads(|| self.inner_type());
 
-        match (f32_non_empty, f64_non_empty)
-        {
-            (true, false) => self.inner_f32.build_top_tree(py),
-            (false, true) => self.inner_f64.build_top_tree(py),
-            (true, true) =>
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Different subtrees were built from f32 and f64 arrays, please rebuild with the same dtype",
-            )),
-            (false, false) => return Err(pyo3::exceptions::PyValueError::new_err(
+        match slf_element_type {
+            MomBuilderInnerType::F32 => self.inner_f32.build_top_tree(py),
+            MomBuilderInnerType::F64 => self.inner_f64.build_top_tree(py),
+            MomBuilderInnerType::Unknown => Err(pyo3::exceptions::PyValueError::new_err(
                 "No subtrees were built, please build at least one subtree",
+            )),
+            MomBuilderInnerType::Invalid => Err(pyo3::exceptions::PyValueError::new_err(
+                "MOMBuilder was used with both f32 and f64 arrays, please rebuild with the same dtype",
             )),
         }
     }
