@@ -19,7 +19,7 @@ macro_rules! impl_from_value_state {
     () => {};
 }
 
-impl_from_value_state!(bool, i8, i16, i32, i64, i128, u8, u16, u32, u64, u128, f32, f64);
+impl_from_value_state!(bool, i8, i16, i32, i64, i128, u8, u16, u32, u64, u128, f32, f64, String);
 
 impl<T> From<T> for ValueState<T> {
     fn from(val: T) -> Self {
