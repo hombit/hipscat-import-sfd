@@ -15,3 +15,4 @@
 pub mod merge_states;
 pub mod min_max_mean;
 pub mod state_is_valid;
+pub mod value;
