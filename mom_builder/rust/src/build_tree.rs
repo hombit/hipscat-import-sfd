@@ -25,8 +25,7 @@
 //! 1. Tree builder consumes an iterator over the leaf states. Some of the leaves could be missing,
 //!   but the iterator must be sorted by strictly increasing index. If the children group is
 //!   complete, the builder tries to merge the states into the parent node. If the group is
-//!   incomplete or the merge state is invalid (see [crate::state::StateIsValid]), the states are
-//!   inserted into the tree as is.
+//!   incomplete or the merge state is invalid the states are inserted into the tree as is.
 //! 2. If the merge is successful, the builder adds the merged state to the parent node.
 //! 3. Check if the parent node is a last child of the grandparent node. For example, for the sketch
 //!    above, the middle level nodes 1 and 3 are last children of the root nodes 0 and 1. If we have
@@ -110,9 +109,10 @@ where
         Ok(tree)
     }
 
-    /// Merges a group of states into a parent node with [MergeStates]. It uses [StateIsValid] to
-    /// check if the merged state is valid. If the merged state is valid, it is inserted into the
-    /// tree and the recursive merge is run with [Self::process_group_by_top_title_index] for the
+    /// Merges a group of states into a parent node with [MergeStates].
+    /// If the states are mergeable [MergeStates.merge] returns [Some],
+    /// the merged state is inserted into the tree
+    /// and the recursive merge is run with [Self::process_group_by_top_title_index] for the
     /// parent node if it is the last child of the grandparent node.
     ///
     /// Arguments:

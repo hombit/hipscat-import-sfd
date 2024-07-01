@@ -1,15 +1,16 @@
 //! Leaf state and merge rules.
 //!
-//! Merge logic is represented by two traits, [MergeStates] and [StateIsValid].
-//! The first one is responsible for merging leaf states to their parent nodes, and the second one
-//! is responsible for checking if the merged state is valid. Two objects implementing these traits
-//! are combined into [StateBuilder] object.
+//! Merge logic is represented by [MergeStates] trait, which merges leaf states to their parent
+//! nodes, or returns [None] if the states cannot be merged.
 //!
-//! Currently, the only type of the leaf state is implemented, [MinMaxMeanState], with a pair of
-//! merge rules, [MinMaxMeanStateMerger] and [MinMaxMeanStateValidator]. The state is represented
-//! by three values: minimum, maximum and mean. [MinMaxMeanStateMerger] merges states by taking
-//! minimum and maximum of the states and calculating the mean value. [MinMaxMeanStateValidator]
-//! checks if the relative difference between minimum and maximum is less than a given threshold.
+//! Currently, the only type of the leaf state is implemented, [MinMaxMeanState],
+//! with [MinMaxMeanStateMerger] merge rule,
+//! which uses [MinMaxMeanStateValidator] to check if the result state is valid.
+//! The state is represented by three values: minimum, maximum and mean.
+//! [MinMaxMeanStateMerger] merges states by taking minimum and maximum of the states
+//! and calculating the mean value.
+//! [MinMaxMeanStateValidator] checks if the relative difference between minimum and maximum is less
+//! than a given threshold.
 
 use numpy::ndarray::NdFloat;
 use serde::{Deserialize, Serialize};
