@@ -1,7 +1,5 @@
 use crate::build_tree::build_tree;
-use crate::state::{
-    MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator, StateBuilder,
-};
+use crate::state::{MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator};
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
@@ -162,14 +160,12 @@ where
         .enumerate()
         .map(|(index, x)| x.map(|value| (index, MinMaxMeanState::from(value))));
 
-    let state_builder = StateBuilder::new(
-        MinMaxMeanStateMerger::new(),
-        MinMaxMeanStateValidator::new(threshold),
-    );
+    let state_validator = MinMaxMeanStateValidator::new(threshold);
+    let state_merger = MinMaxMeanStateMerger::new(state_validator);
 
     let tree_config = TreeConfig::new(12usize, 4usize, max_norder);
 
-    let tree = build_tree(state_builder, tree_config, it_states)?;
+    let tree = build_tree(state_merger, tree_config, it_states)?;
 
     let output = tree
         .into_iter()
@@ -197,7 +193,7 @@ struct GenericMomBuilder<T> {
     subtree_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
     subtree_config: TreeConfig,
     top_tree_config: TreeConfig,
-    state_builder: StateBuilder<MinMaxMeanStateMerger<T>, MinMaxMeanStateValidator<T>>,
+    merger: MinMaxMeanStateMerger<MinMaxMeanStateValidator<T>>,
 }
 
 impl<T> GenericMomBuilder<T>
@@ -217,10 +213,8 @@ where
             ));
         }
 
-        let state_builder = StateBuilder::new(
-            MinMaxMeanStateMerger::new(),
-            MinMaxMeanStateValidator::new(threshold),
-        );
+        let state_validator = MinMaxMeanStateValidator::new(threshold);
+        let merger = MinMaxMeanStateMerger::new(state_validator);
 
         Ok(Self {
             subtree_states: RwLock::new(BTreeMap::new()),
@@ -229,7 +223,7 @@ where
             thread_safe,
             subtree_config: TreeConfig::new(1usize, 4usize, max_norder - split_norder),
             top_tree_config: TreeConfig::new(12usize, 4usize, split_norder),
-            state_builder,
+            merger,
         })
     }
 
@@ -316,7 +310,7 @@ where
                 .map(|(relative_index, &x)| -> Result<_, Infallible> {
                     Ok((index_offset + relative_index, MinMaxMeanState::new(x)))
                 });
-        let mut tree = build_tree(self.state_builder, self.subtree_config.clone(), it_states)?;
+        let mut tree = build_tree(self.merger, self.subtree_config.clone(), it_states)?;
 
         // Extract root node from the tree, it should have at most one state
         let root_tiles = tree.remove(0);
@@ -373,7 +367,7 @@ where
             });
 
             Ok(build_tree(
-                self.state_builder,
+                self.merger,
                 self.top_tree_config.clone(),
                 it_states,
             )?)
@@ -597,8 +591,7 @@ impl MomBuilder {
 
         let output = PyArray1::from_vec(
             py,
-            (offset..offset + self.inner_f32.subtree_config.max_norder_nleaves())
-                .collect(),
+            (offset..offset + self.inner_f32.subtree_config.max_norder_nleaves()).collect(),
         );
         Ok(output)
     }
@@ -748,20 +741,13 @@ impl MomBuilder {
     }
 
     // pickle stuff
-    fn __getnewargs_ex__(
-        &self,
-        py: Python<'_>,
-    ) -> ((usize,), HashMap<&'static str, PyObject>) {
+    fn __getnewargs_ex__(&self, py: Python<'_>) -> ((usize,), HashMap<&'static str, PyObject>) {
         let args = (self.inner_f64.max_norder,);
         let kwargs = [
             ("split_norder", self.inner_f64.split_norder.into_py(py)),
             (
                 "threshold",
-                self.inner_f64
-                    .state_builder
-                    .validator
-                    .threshold()
-                    .into_py(py),
+                self.inner_f64.merger.validator.threshold().into_py(py),
             ),
             ("thread_safe", self.inner_f64.thread_safe.into_py(py)),
         ];
@@ -771,10 +757,7 @@ impl MomBuilder {
     fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
         let vec_bytes =
             serde_pickle::to_vec(&self, serde_pickle::SerOptions::new()).map_err(|err| {
-                pyo3::exceptions::PyException::new_err(format!(
-                    "Cannot pickle MOMBuilder: {}",
-                    err
-                ))
+                pyo3::exceptions::PyException::new_err(format!("Cannot pickle MOMBuilder: {}", err))
             })?;
         Ok(PyBytes::new(py, &vec_bytes))
     }

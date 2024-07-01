@@ -13,15 +13,14 @@
 
 use numpy::ndarray::NdFloat;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
 
 /// Trait for merging leaf states to their parent nodes.
 pub trait MergeStates {
     /// Type of the leaf state.
     type State: Sized;
 
-    /// Merges the given states to a single state.
-    fn merge(&self, states: &[Self::State]) -> Self::State;
+    /// Merges the given states to a single state or returns [None] if the states cannot be merged.
+    fn merge(&self, states: &[Self::State]) -> Option<Self::State>;
 }
 
 /// Trait for checking if the merged state is valid.
@@ -85,33 +84,26 @@ where
 
 /// Merges leaf states by taking minimum and maximum of the states and calculating the mean value.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct MinMaxMeanStateMerger<T> {
-    phantom: PhantomData<T>,
+pub struct MinMaxMeanStateMerger<V> {
+    pub validator: V,
 }
 
-impl<T> Default for MinMaxMeanStateMerger<T> {
-    fn default() -> Self {
-        Self::new()
+impl<V> MinMaxMeanStateMerger<V> {
+    pub fn new(validator: V) -> Self {
+        Self { validator }
     }
 }
 
-impl<T> MinMaxMeanStateMerger<T> {
-    pub fn new() -> Self {
-        Self {
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T> MergeStates for MinMaxMeanStateMerger<T>
+impl<T, V> MergeStates for MinMaxMeanStateMerger<V>
 where
     T: NdFloat,
+    V: StateIsValid<State = MinMaxMeanState<T>>,
 {
     type State = MinMaxMeanState<T>;
 
     /// Merges the given states by taking minimum and maximum of the states and calculating the mean
     /// value.
-    fn merge(&self, states: &[Self::State]) -> Self::State {
+    fn merge(&self, states: &[Self::State]) -> Option<Self::State> {
         assert!(!states.is_empty());
 
         let mut min = states[0].min;
@@ -126,10 +118,16 @@ where
             }
             sum += state.mean;
         }
-        Self::State {
+        let merged_state = Self::State {
             min,
             max,
             mean: sum / T::from(states.len()).expect("N cannot be casted to float"),
+        };
+
+        if self.validator.state_is_valid(&merged_state) {
+            Some(merged_state)
+        } else {
+            None
         }
     }
 }
@@ -177,25 +175,5 @@ where
         }
         let ratio = (state.max - state.min) / denominator;
         ratio <= self.threshold
-    }
-}
-
-/// State merge rules.
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct StateBuilder<Merger, Validator> {
-    /// State merger, implements [MergeStates] trait.
-    pub merger: Merger,
-    /// State validator, implements [StateIsValid] trait.
-    pub validator: Validator,
-}
-
-impl<S, Merger, Validator> StateBuilder<Merger, Validator>
-where
-    Merger: MergeStates<State = S>,
-    Validator: StateIsValid<State = S>,
-{
-    /// Creates a new [StateBuilder] with the given merger and validator.
-    pub fn new(merger: Merger, validator: Validator) -> Self {
-        Self { merger, validator }
     }
 }

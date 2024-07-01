@@ -37,7 +37,7 @@
 
 use crate::exclusive_option::ExclusiveOption;
 use crate::norder_leaves::NorderLeaves;
-use crate::state::{MergeStates, StateBuilder, StateIsValid};
+use crate::state::MergeStates;
 use crate::tree::{Tree, TreeMutRef};
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
@@ -48,15 +48,14 @@ use itertools::Itertools;
 /// The merge rules are defined by the user, see [crate::state] module for the details. For now it
 /// is exclusively used by [build_tree] function.
 #[derive(Clone)]
-pub struct TreeBuilder<Merger, Validator> {
-    pub state_builder: StateBuilder<Merger, Validator>,
+pub struct TreeBuilder<Merger> {
+    pub merger: Merger,
     pub config: TreeConfig,
 }
 
-impl<S, Merger, Validator> TreeBuilder<Merger, Validator>
+impl<S, Merger> TreeBuilder<Merger>
 where
     Merger: MergeStates<State = S>,
-    Validator: StateIsValid<State = S>,
     S: Copy + std::fmt::Debug,
 {
     /// Build a tree from a fallible iterator over the leaf states.
@@ -129,9 +128,7 @@ where
         assert_eq!(states.len(), self.config.n_children());
         assert_ne!(subtree.len(), 0);
 
-        let merged_state = self.state_builder.merger.merge(states);
-
-        if self.state_builder.validator.state_is_valid(&merged_state) {
+        if let Some(merged_state) = self.merger.merge(states) {
             subtree
                 .last_mut()
                 .expect("tree should not be empty")
@@ -208,18 +205,17 @@ where
 /// Returns:
 /// - [Ok] with a [Tree] object, if all the states are valid, and [Err] if one of the states has
 ///   failed. The function never returns [Err] for its own errors, but could panic.
-pub fn build_tree<S, Merger, Validator, E>(
-    state_builder: StateBuilder<Merger, Validator>,
+pub fn build_tree<S, Merger, E>(
+    merger: Merger,
     tree_config: TreeConfig,
     max_norder_states: impl IntoIterator<Item = Result<(usize, S), E>>,
 ) -> Result<Tree<S>, E>
 where
     Merger: MergeStates<State = S>,
-    Validator: StateIsValid<State = S>,
     S: Copy + std::fmt::Debug,
 {
     TreeBuilder {
-        state_builder,
+        merger,
         config: tree_config,
     }
     .build(max_norder_states)
