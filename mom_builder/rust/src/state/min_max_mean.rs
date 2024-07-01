@@ -3,6 +3,20 @@ use crate::state::state_is_valid::StateIsValid;
 use numpy::ndarray::NdFloat;
 use serde::{Deserialize, Serialize};
 
+/// Leaf state with minimum, maximum and mean values.
+///
+/// It implements [Into] trait for [f32] and [f64], so it can be converted to its mean value.
+/// [From] trait for `T` which just assigns the given value to all three fields.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MinMaxMeanState<T> {
+    /// Minimum value.
+    pub min: T,
+    /// Maximum value.
+    pub max: T,
+    /// Mean value.
+    pub mean: T,
+}
+
 impl<T> MinMaxMeanState<T>
 where
     T: Copy,
@@ -30,19 +44,28 @@ impl From<MinMaxMeanState<f64>> for f64 {
     }
 }
 
+impl<T> From<T> for MinMaxMeanState<T>
+where
+    T: Copy,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
 /// Merges leaf states by taking minimum and maximum of the states and calculating the mean value.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct MinMaxMeanStateMerger<V> {
+pub struct Merger<V> {
     pub validator: V,
 }
 
-impl<V> MinMaxMeanStateMerger<V> {
+impl<V> Merger<V> {
     pub fn new(validator: V) -> Self {
         Self { validator }
     }
 }
 
-impl<T, V> MergeStates for MinMaxMeanStateMerger<V>
+impl<T, V> MergeStates for Merger<V>
 where
     T: NdFloat,
     V: StateIsValid<State = MinMaxMeanState<T>>,
@@ -84,15 +107,15 @@ where
 ///
 /// Basically it checks if `abs(max - min) / max <= threshold`, but with some edge-case handling.
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct MinMaxMeanStateValidator<T> {
+pub struct RelativeToleranceValidator<T> {
     threshold: T,
 }
 
-impl<T> MinMaxMeanStateValidator<T>
+impl<T> RelativeToleranceValidator<T>
 where
     T: NdFloat,
 {
-    /// Creates a new [MinMaxMeanStateValidator] with the given threshold.
+    /// Creates a new [RelativeToleranceValidator] with the given threshold.
     ///
     /// The threshold must be non-negative, otherwise the method panics.
     pub fn new(threshold: T) -> Self {
@@ -106,7 +129,7 @@ where
     }
 }
 
-impl<T> StateIsValid for MinMaxMeanStateValidator<T>
+impl<T> StateIsValid for RelativeToleranceValidator<T>
 where
     T: NdFloat,
 {
@@ -123,28 +146,5 @@ where
         }
         let ratio = (state.max - state.min) / denominator;
         ratio <= self.threshold
-    }
-}
-
-/// Leaf state with minimum, maximum and mean values.
-///
-/// It implements [Into] trait for [f32] and [f64], so it can be converted to its mean value.
-/// [From] trait for `T` which just assigns the given value to all three fields.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MinMaxMeanState<T> {
-    /// Minimum value.
-    pub min: T,
-    /// Maximum value.
-    pub max: T,
-    /// Mean value.
-    pub mean: T,
-}
-
-impl<T> From<T> for MinMaxMeanState<T>
-where
-    T: Copy,
-{
-    fn from(value: T) -> Self {
-        Self::new(value)
     }
 }

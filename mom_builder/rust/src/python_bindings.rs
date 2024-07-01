@@ -1,6 +1,6 @@
 use crate::build_tree::build_tree;
+use crate::state::min_max_mean;
 use crate::state::min_max_mean::MinMaxMeanState;
-use crate::state::min_max_mean::{MinMaxMeanStateMerger, MinMaxMeanStateValidator};
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;
@@ -161,8 +161,8 @@ where
         .enumerate()
         .map(|(index, x)| x.map(|value| (index, MinMaxMeanState::from(value))));
 
-    let state_validator = MinMaxMeanStateValidator::new(threshold);
-    let state_merger = MinMaxMeanStateMerger::new(state_validator);
+    let state_validator = min_max_mean::RelativeToleranceValidator::new(threshold);
+    let state_merger = min_max_mean::Merger::new(state_validator);
 
     let tree_config = TreeConfig::new(12usize, 4usize, max_norder);
 
@@ -194,7 +194,7 @@ struct GenericMomBuilder<T> {
     subtree_states: RwLock<BTreeMap<usize, Option<MinMaxMeanState<T>>>>,
     subtree_config: TreeConfig,
     top_tree_config: TreeConfig,
-    merger: MinMaxMeanStateMerger<MinMaxMeanStateValidator<T>>,
+    merger: min_max_mean::Merger<min_max_mean::RelativeToleranceValidator<T>>,
 }
 
 impl<T> GenericMomBuilder<T>
@@ -214,8 +214,8 @@ where
             ));
         }
 
-        let state_validator = MinMaxMeanStateValidator::new(threshold);
-        let merger = MinMaxMeanStateMerger::new(state_validator);
+        let state_validator = min_max_mean::RelativeToleranceValidator::new(threshold);
+        let merger = min_max_mean::Merger::new(state_validator);
 
         Ok(Self {
             subtree_states: RwLock::new(BTreeMap::new()),
