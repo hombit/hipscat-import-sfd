@@ -1,5 +1,6 @@
 use crate::build_tree::build_tree;
-use crate::state::{MinMaxMeanState, MinMaxMeanStateMerger, MinMaxMeanStateValidator};
+use crate::state::min_max_mean::MinMaxMeanState;
+use crate::state::min_max_mean::{MinMaxMeanStateMerger, MinMaxMeanStateValidator};
 use crate::tree::Tree;
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;

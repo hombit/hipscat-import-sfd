@@ -36,7 +36,7 @@
 
 use crate::exclusive_option::ExclusiveOption;
 use crate::norder_leaves::NorderLeaves;
-use crate::state::MergeStates;
+use crate::state::merge_states::MergeStates;
 use crate::tree::{Tree, TreeMutRef};
 use crate::tree_config::TreeConfig;
 use itertools::Itertools;

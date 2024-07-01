@@ -14,9 +14,9 @@
 //! adopting [healpix](https://healpix.jpl.nasa.gov) terminology). See [tree_config] for the
 //! tree specification.
 //!
-//! Currently, the only type of the leaf state is implemented, [state::MinMaxMeanState],
-//! which is accompained by a couple of merge rules, [state::MinMaxMeanStateMerger] and
-//! [state::MinMaxMeanStateValidator].
+//! Currently, the only type of the leaf state is implemented, [min_max_mean::MinMaxMeanState],
+//! which is accompained by a couple of merge rules, [min_max_mean::MinMaxMeanStateMerger] and
+//! [min_max_mean::MinMaxMeanStateValidator].
 //!
 //! The Python part of the crate provides a Python extension module, see `python_bindings` for the
 //! details. The module implements building of healpix maps (twelve trees with four children per

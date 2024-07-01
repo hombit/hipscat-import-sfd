@@ -1,51 +1,7 @@
-//! Leaf state and merge rules.
-//!
-//! Merge logic is represented by [MergeStates] trait, which merges leaf states to their parent
-//! nodes, or returns [None] if the states cannot be merged.
-//!
-//! Currently, the only type of the leaf state is implemented, [MinMaxMeanState],
-//! with [MinMaxMeanStateMerger] merge rule,
-//! which uses [MinMaxMeanStateValidator] to check if the result state is valid.
-//! The state is represented by three values: minimum, maximum and mean.
-//! [MinMaxMeanStateMerger] merges states by taking minimum and maximum of the states
-//! and calculating the mean value.
-//! [MinMaxMeanStateValidator] checks if the relative difference between minimum and maximum is less
-//! than a given threshold.
-
+use crate::state::merge_states::MergeStates;
+use crate::state::state_is_valid::StateIsValid;
 use numpy::ndarray::NdFloat;
 use serde::{Deserialize, Serialize};
-
-/// Trait for merging leaf states to their parent nodes.
-pub trait MergeStates {
-    /// Type of the leaf state.
-    type State: Sized;
-
-    /// Merges the given states to a single state or returns [None] if the states cannot be merged.
-    fn merge(&self, states: &[Self::State]) -> Option<Self::State>;
-}
-
-/// Trait for checking if the merged state is valid.
-pub trait StateIsValid {
-    /// Type of the leaf state.
-    type State;
-
-    /// Checks if the given state is valid, i.e. if it should be stored in the tree.
-    fn state_is_valid(&self, state: &Self::State) -> bool;
-}
-
-/// Leaf state with minimum, maximum and mean values.
-///
-/// It implements [Into] trait for [f32] and [f64], so it can be converted to its mean value.
-/// [From] trait for `T` which just assigns the given value to all three fields.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MinMaxMeanState<T> {
-    /// Minimum value.
-    pub min: T,
-    /// Maximum value.
-    pub max: T,
-    /// Mean value.
-    pub mean: T,
-}
 
 impl<T> MinMaxMeanState<T>
 where
@@ -71,15 +27,6 @@ impl From<MinMaxMeanState<f32>> for f32 {
 impl From<MinMaxMeanState<f64>> for f64 {
     fn from(val: MinMaxMeanState<f64>) -> Self {
         val.mean
-    }
-}
-
-impl<T> From<T> for MinMaxMeanState<T>
-where
-    T: Copy,
-{
-    fn from(value: T) -> Self {
-        Self::new(value)
     }
 }
 
@@ -168,7 +115,7 @@ where
     /// Checks if the relative difference between minimum and maximum is less than the threshold.
     ///
     /// Basically it checks if `abs(max - min) / norm <= threshold`, where `norm` is the maximum of
-    /// the absolute values of `min` and `max`. If both are zero, the method returns `true`.  
+    /// the absolute values of `min` and `max`. If both are zero, the method returns `true`.
     fn state_is_valid(&self, state: &Self::State) -> bool {
         let denominator = T::max(T::abs(state.min), T::abs(state.max));
         if denominator.is_zero() {
@@ -176,5 +123,28 @@ where
         }
         let ratio = (state.max - state.min) / denominator;
         ratio <= self.threshold
+    }
+}
+
+/// Leaf state with minimum, maximum and mean values.
+///
+/// It implements [Into] trait for [f32] and [f64], so it can be converted to its mean value.
+/// [From] trait for `T` which just assigns the given value to all three fields.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MinMaxMeanState<T> {
+    /// Minimum value.
+    pub min: T,
+    /// Maximum value.
+    pub max: T,
+    /// Mean value.
+    pub mean: T,
+}
+
+impl<T> From<T> for MinMaxMeanState<T>
+where
+    T: Copy,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
     }
 }
