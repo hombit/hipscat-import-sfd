@@ -11,6 +11,12 @@ pub struct NorderLeaves<T> {
     values: Vec<T>,
 }
 
+impl<T> Default for NorderLeaves<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> NorderLeaves<T> {
     /// Create a new empty [NorderLeaves].
     pub fn new() -> Self {
@@ -43,6 +49,11 @@ impl<T> NorderLeaves<T> {
     /// Returns the number of values stored in the [NorderLeaves].
     pub fn len(&self) -> usize {
         self.indexes.len()
+    }
+
+    /// Returns true if the [NorderLeaves] is empty.
+    pub fn is_empty(&self) -> bool {
+        self.indexes.is_empty()
     }
 
     /// Get the last inserted values according to the given indexes.

@@ -89,6 +89,12 @@ pub struct MinMaxMeanStateMerger<T> {
     phantom: PhantomData<T>,
 }
 
+impl<T> Default for MinMaxMeanStateMerger<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> MinMaxMeanStateMerger<T> {
     pub fn new() -> Self {
         Self {

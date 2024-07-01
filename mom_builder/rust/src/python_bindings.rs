@@ -115,9 +115,9 @@ fn py_mom_from_batch_it<'py>(
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Input iterator is empty"))??;
 
     if let Ok(array) = first_element.downcast::<PyArray1<f32>>() {
-        mom_from_first_and_it(py, array, &py_iter, max_norder, threshold as f32)
+        mom_from_first_and_it(py, array, py_iter, max_norder, threshold as f32)
     } else if let Ok(array) = first_element.downcast::<PyArray1<f64>>() {
-        mom_from_first_and_it(py, array, &py_iter, max_norder, threshold)
+        mom_from_first_and_it(py, array, py_iter, max_norder, threshold)
     } else {
         Err(pyo3::exceptions::PyTypeError::new_err(
             "Iterator items must be 1-D numpy arrays having dtype f32 or f64",
@@ -137,7 +137,7 @@ where
     MinMaxMeanState<T>: Into<T>,
 {
     let it = once(first)
-        .map(|array| Ok(array))
+        .map(Ok)
         .chain(py_iter.map(|batch| Ok(batch?.downcast::<PyArray1<T>>()?)))
         .map_ok(|py_array| {
             let py_ro = py_array.readonly();
@@ -148,12 +148,12 @@ where
     mom_from_it(py, it, max_norder, threshold)
 }
 
-fn mom_from_it<'py, T, E>(
-    py: Python<'py>,
+fn mom_from_it<T, E>(
+    py: Python<'_>,
     it: impl Iterator<Item = Result<T, E>>,
     max_norder: usize,
     threshold: T,
-) -> Result<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>, E>
+) -> Result<Vec<(&PyArray1<usize>, &PyUntypedArray)>, E>
 where
     T: NdFloat + numpy::Element,
     MinMaxMeanState<T>: Into<T>,
@@ -402,7 +402,7 @@ where
         );
 
         for (index, state) in other_states.into_iter() {
-            if let Some(_) = states.insert(index, state) {
+            if states.insert(index, state).is_some() {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "State with index {index} already exists",
                 )));
@@ -598,7 +598,6 @@ impl MomBuilder {
         let output = PyArray1::from_vec(
             py,
             (offset..offset + self.inner_f32.subtree_config.max_norder_nleaves())
-                .map(|i| i)
                 .collect(),
         );
         Ok(output)
@@ -749,9 +748,9 @@ impl MomBuilder {
     }
 
     // pickle stuff
-    fn __getnewargs_ex__<'py>(
+    fn __getnewargs_ex__(
         &self,
-        py: Python<'py>,
+        py: Python<'_>,
     ) -> ((usize,), HashMap<&'static str, PyObject>) {
         let args = (self.inner_f64.max_norder,);
         let kwargs = [
@@ -774,18 +773,18 @@ impl MomBuilder {
             serde_pickle::to_vec(&self, serde_pickle::SerOptions::new()).map_err(|err| {
                 pyo3::exceptions::PyException::new_err(format!(
                     "Cannot pickle MOMBuilder: {}",
-                    err.to_string()
+                    err
                 ))
             })?;
         Ok(PyBytes::new(py, &vec_bytes))
     }
 
-    fn __setstate__<'py>(&mut self, state: &'py PyBytes) -> PyResult<()> {
+    fn __setstate__(&mut self, state: &PyBytes) -> PyResult<()> {
         *self = serde_pickle::from_slice(state.as_bytes(), serde_pickle::DeOptions::new())
             .map_err(|err| {
                 pyo3::exceptions::PyValueError::new_err(format!(
                     "Cannot unpickle MOMBuilder: {}",
-                    err.to_string()
+                    err
                 ))
             })?;
         Ok(())
