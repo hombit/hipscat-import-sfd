@@ -613,7 +613,7 @@ impl MomBuilder {
         subtree_index: usize,
     ) -> PyResult<&'py PyArray1<usize>> {
         if subtree_index >= self.py_builder_config.top_tree_config.max_norder_nleaves() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(PyValueError::new_err(
                 "subtree_index is out of range",
             ));
         }

@@ -61,7 +61,7 @@ def test_arange(dtype):
         fn=lambda _order, indexes: data[indexes],
         max_norder=max_norder,
         split_norder=split_norder,
-        threshold=threshold,
+        merger=threshold,
     )
     tree_from_fn = tree_from_gen(gen, max_norder)
 

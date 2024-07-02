@@ -14,7 +14,7 @@ where `norm` is the maximum absolute value of the minimum and maximum.
 from .mom_builder import *
 
 
-def gen_mom_from_fn(fn, max_norder, *, split_norder=None, threshold):
+def gen_mom_from_fn(fn, *, max_norder, split_norder=None, merger, dtype=None):
     """Generator that builds a tree using the given function of healpix tile
 
     The generator goes over all subtrees and calls the given function with
@@ -37,6 +37,12 @@ def gen_mom_from_fn(fn, max_norder, *, split_norder=None, threshold):
         function for each of the indexes, it must has the same length as
         `indexes` and always be the same float dtype (so it should not return
         float32 for some indexes and float64 for others).
+    merger : MOMMerger or float
+        Merging algorithm to use. If a float is given, min-max-mean states
+        are merged if the relative difference between the minimum and maximum
+        values is below this threshold. It is the same as setting merger to
+        MOMMerger("min-max-mean", "rtol", threshold=threshold, dtype=dtype),
+        where dtype is derived from the return of `fn`.
     max_norder : int
         Maximum depth of the healpix tree.
     split_norder : int, optional
@@ -44,10 +50,6 @@ def gen_mom_from_fn(fn, max_norder, *, split_norder=None, threshold):
         which should lead to a consistent memory usage. However, it can
         be suboptimal for performance of `fn`, consider set it to lower
         values to have a trade-off between memory and performance.
-    threshold : float
-        When merging leaf states to their parent nodes, the relative difference
-        between minimum and maximum values is checked against this threshold.
-        Must be non-negative.
 
     Yields
     ------
@@ -59,10 +61,16 @@ def gen_mom_from_fn(fn, max_norder, *, split_norder=None, threshold):
         norder. That means that the same `norder` can be yielded multiple
         times, but always with increasing `indexes`.
     """
+    if not isinstance(merger, MOMMerger):
+        import numpy as np
+
+        dtype = fn(max_norder, np.array([0], dtype=np.uint64)).dtype
+        merger = MOMMerger("min-max-mean", "rtol", threshold=merger, dtype=dtype)
+
     if split_norder is None:
         split_norder = max_norder // 2
     # We are not going to build the tree in parallel, so we can use the non-thread-safe builder
-    builder = MOMBuilder(max_norder, split_norder=split_norder, threshold=threshold, thread_safe=False)
+    builder = MOMBuilder(merger, max_norder=max_norder, split_norder=split_norder, thread_safe=False)
 
     for subtree_index in range(builder.num_subtrees):
         indexes = builder.subtree_maxnorder_indexes(subtree_index)
