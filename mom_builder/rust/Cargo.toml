@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 itertools = "0.12"
 numpy = "0.20"
 pyo3 = { version = "0.20", features= ["extension-module"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 # We may use any serialization format, but pickle makes it easy to introspect with Python
 serde-pickle = "1"
 thiserror = "1.0.50"

@@ -213,7 +213,7 @@ where
 /// **kwargs : dict
 ///     Additional arguments for the merger, please see the `merger` parameter
 ///     description.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 #[pyclass(name = "MOMMerger", module = "mom_builder.mom_builder")]
 struct MomMerger {
     tree_states: PyStates,
@@ -239,7 +239,7 @@ impl MomMerger {
                 "rtol" => {
                     if kwargs.keys().len() != 1 {
                         return Err(PyValueError::new_err(
-                            "Only one keyword argument is allowed for state='min-max-mean' and merger='rtol'",
+                            "state='min-max-mean' and merger='rtol' require exactly one additional keyword argument: threshold",
                         ));
                     }
                     let threshold = *kwargs
@@ -251,7 +251,7 @@ impl MomMerger {
                             let state_validator =
                                 min_max_mean::RelativeToleranceValidator::new(threshold as f32);
                             let state_merger = min_max_mean::Merger::new(state_validator);
-                            PyStates::MinMaxMean(PyMinMaxMeanStates::F32(GenericStates::new (
+                            PyStates::MinMaxMean(PyMinMaxMeanStates::F32(GenericStates::new(
                                 state_merger,
                             )))
                         }
@@ -259,7 +259,7 @@ impl MomMerger {
                             let state_validator =
                                 min_max_mean::RelativeToleranceValidator::new(threshold);
                             let state_merger = min_max_mean::Merger::new(state_validator);
-                            PyStates::MinMaxMean(PyMinMaxMeanStates::F64(GenericStates::new (
+                            PyStates::MinMaxMean(PyMinMaxMeanStates::F64(GenericStates::new(
                                 state_merger,
                             )))
                         }
@@ -308,6 +308,63 @@ impl MomMerger {
             tree_states,
             dtype_char,
         })
+    }
+
+    // pickle support
+
+    fn __getnewargs_ex__(
+        &self,
+        py: Python,
+    ) -> PyResult<(
+        (&'static str, &'static str),
+        HashMap<&'static str, PyObject>,
+    )> {
+        let state_str = match &self.tree_states {
+            PyStates::MinMaxMean(_) => "min-max-mean",
+            PyStates::Value(_) => "value",
+        };
+        let merger_str = match &self.tree_states {
+            PyStates::MinMaxMean(_) => "rtol",
+            PyStates::Value(_) => "equal",
+        };
+        let kwargs = {
+            let mut kwargs = match &self.tree_states {
+                PyStates::MinMaxMean(PyMinMaxMeanStates::F32(generic)) => [(
+                    "threshold",
+                    generic.merger.validator.threshold().into_py(py),
+                )]
+                .into_iter()
+                .collect(),
+                PyStates::MinMaxMean(PyMinMaxMeanStates::F64(generic)) => [(
+                    "threshold",
+                    generic.merger.validator.threshold().into_py(py),
+                )]
+                .into_iter()
+                .collect(),
+                PyStates::Value(_) => HashMap::new(),
+            };
+            kwargs.insert("dtype", PyArrayDescr::new(py, &self.dtype_char)?.into_py(py));
+            kwargs
+        };
+
+        Ok(((state_str, merger_str), kwargs))
+    }
+
+    fn __getstate__<'py>(&self, py: Python<'py>) -> &'py PyBytes {
+        PyBytes::new(py, &[])
+    }
+
+    fn __setstate__(&mut self, _state: &PyBytes) {
+        ()
+    }
+
+    // copy/deepcopy support
+    fn __copy__(&self) -> Self {
+        self.clone()
+    }
+
+    fn __deepcopy__(&self, _memo: Py<PyAny>) -> Self {
+        self.clone()
     }
 }
 
@@ -378,14 +435,14 @@ impl MomMerger {
 /// extend(other)
 ///     Extends the builder with another builder. That builder will be cleared
 ///
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 #[pyclass(name = "MOMBuilder", module = "mom_builder.mom_builder")]
 struct MomBuilder {
     py_builder_config: PyBuilderConfig,
     states: PyStates,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PyBuilderConfig {
     split_norder: usize,
     max_norder: usize,
@@ -401,13 +458,13 @@ impl PyBuilderConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 enum PyStates {
     MinMaxMean(PyMinMaxMeanStates),
     Value(PyValueStates),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GenericStates<T, State, Merger>
 where
     Merger: MergeStates<State = State>,
@@ -417,7 +474,10 @@ where
     merger: Merger,
 }
 
-impl<T, State, Merger> GenericStates<T, State, Merger> where Merger: MergeStates<State = State> {
+impl<T, State, Merger> GenericStates<T, State, Merger>
+where
+    Merger: MergeStates<State = State>,
+{
     fn new(merger: Merger) -> Self {
         Self {
             phantom_element: PhantomData,
@@ -438,29 +498,31 @@ where
 
 type StateTree<State> = Arc<RwLock<BTreeMap<usize, Option<State>>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 enum PyMinMaxMeanStates {
     F32(
-        GenericStates<f32,
+        GenericStates<
+            f32,
             MinMaxMeanState<f32>,
             min_max_mean::Merger<min_max_mean::RelativeToleranceValidator<f32>>,
         >,
     ),
     F64(
-        GenericStates<f64,
+        GenericStates<
+            f64,
             MinMaxMeanState<f64>,
             min_max_mean::Merger<min_max_mean::RelativeToleranceValidator<f64>>,
         >,
     ),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 enum PyValueStates {
-    Bool(GenericStates<bool,ValueState<bool>, value::ExactlyEqualMerger<bool>>),
+    Bool(GenericStates<bool, ValueState<bool>, value::ExactlyEqualMerger<bool>>),
     I8(GenericStates<i8, ValueState<i8>, value::ExactlyEqualMerger<i8>>),
-    I16(GenericStates<i16,ValueState<i16>, value::ExactlyEqualMerger<i16>>),
-    I32(GenericStates<i32,ValueState<i32>, value::ExactlyEqualMerger<i32>>),
-    I64(GenericStates<i64,ValueState<i64>, value::ExactlyEqualMerger<i64>>),
+    I16(GenericStates<i16, ValueState<i16>, value::ExactlyEqualMerger<i16>>),
+    I32(GenericStates<i32, ValueState<i32>, value::ExactlyEqualMerger<i32>>),
+    I64(GenericStates<i64, ValueState<i64>, value::ExactlyEqualMerger<i64>>),
     U8(GenericStates<u8, ValueState<u8>, value::ExactlyEqualMerger<u8>>),
     U16(GenericStates<u16, ValueState<u16>, value::ExactlyEqualMerger<u16>>),
     U32(GenericStates<u32, ValueState<u32>, value::ExactlyEqualMerger<u32>>),
@@ -697,19 +759,15 @@ impl MomBuilder {
     /// None
     fn extend(&self, py: Python, other: &Self) -> PyResult<()> {
         if self.max_norder() != other.max_norder() {
-            return Err(PyValueError::new_err(
-                "max_norder must be the same",
-            ));
+            return Err(PyValueError::new_err("max_norder must be the same"));
         }
         if self.split_norder() != other.split_norder() {
-            return Err(PyValueError::new_err(
-                "split_norder must be the same",
-            ));
+            return Err(PyValueError::new_err("split_norder must be the same"));
         }
-        if self.py_builder_config.mom_merger.dtype_char != other.py_builder_config.mom_merger.dtype_char {
-            return Err(PyValueError::new_err(
-                "dtype must be the same",
-            ));
+        if self.py_builder_config.mom_merger.dtype_char
+            != other.py_builder_config.mom_merger.dtype_char
+        {
+            return Err(PyValueError::new_err("dtype must be the same"));
         }
 
         py.allow_threads(|| -> PyResult<()> {
@@ -772,6 +830,10 @@ impl MomBuilder {
             }
         })
     }
+
+    // pickle support
+
+    // copy/deepcopy support
 }
 
 impl<T, State, Merger> GenericStates<T, State, Merger>
@@ -891,11 +953,7 @@ where
                 state.map(|state| -> Result<_, Infallible> { Ok((index, state)) })
             });
 
-            Ok(build_tree(
-                self.merger,
-                top_tree_config,
-                it_states,
-            )?)
+            Ok(build_tree(self.merger, top_tree_config, it_states)?)
         })?;
 
         Ok(self.tree_to_python(py, tree, 0))
