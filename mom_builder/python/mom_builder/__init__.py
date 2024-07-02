@@ -64,7 +64,7 @@ def gen_mom_from_fn(fn, *, max_norder, split_norder=None, merger, dtype=None):
     if not isinstance(merger, MOMMerger):
         import numpy as np
 
-        dtype = fn(max_norder, np.array([0], dtype=np.uint64)).dtype
+        dtype = fn(max_norder, np.arange(16, dtype=np.uint64)).dtype
         merger = MOMMerger("min-max-mean", "rtol", threshold=merger, dtype=dtype)
 
     if split_norder is None:
