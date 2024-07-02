@@ -25,6 +25,8 @@ pyo3::import_exception!(pickle, UnpicklingError);
 
 /// Builds multi-order healpix maps from an array of leaf values
 ///
+/// Currently, support min-max-mean states only.
+///
 /// Parameters
 /// ----------
 /// a : numpy.ndarray of float32 or float64
@@ -91,6 +93,8 @@ where
 /// It is a variant of `mom_from_array` which accepts an iterator
 /// of leaf value batches instead of an array. It is useful when
 /// the input array is too large to fit into memory.
+///
+/// Currently, support min-max-mean states only.
 ///
 /// Parameters
 /// ----------
@@ -346,7 +350,10 @@ impl MomMerger {
                 .collect(),
                 PyStates::Value(_) => HashMap::new(),
             };
-            kwargs.insert("dtype", PyArrayDescr::new(py, &self.dtype_char)?.into_py(py));
+            kwargs.insert(
+                "dtype",
+                PyArrayDescr::new(py, &self.dtype_char)?.into_py(py),
+            );
             kwargs
         };
 
@@ -401,11 +408,11 @@ impl MomMerger {
 ///
 /// Parameters
 /// ----------
+/// merger : MOMMerger
+///     Merger algorithm to use to build the tree.
 /// max_norder : int
 ///     Maximum depth of the healpix tree. It is the maximum norder of the
 ///     whole tree, not of the subtrees.
-/// merger : MOMMerger
-///     Merger algorithm to use to build the tree.
 /// split_norder : int
 ///     Maximum depth of the top tree. It is level of the tree where it is
 ///     split into subtrees.
@@ -537,10 +544,10 @@ enum PyValueStates {
 #[pymethods]
 impl MomBuilder {
     #[new]
-    #[pyo3(signature = (max_norder, merger, *, split_norder, thread_safe=true))]
+    #[pyo3(signature = (merger, *, max_norder, split_norder, thread_safe=true))]
     fn __new__(
-        max_norder: usize,
         merger: MomMerger,
+        max_norder: usize,
         split_norder: usize,
         thread_safe: bool,
     ) -> Self {
@@ -835,31 +842,30 @@ impl MomBuilder {
     }
 
     // pickle support
-    fn __getnewargs_ex__(&self, py: Python<'_>) -> ((usize, MomMerger), HashMap<&'static str, PyObject>) {
-        let max_norder = self.py_builder_config.max_norder;
+    fn __getnewargs_ex__(&self, py: Python<'_>) -> ((MomMerger,), HashMap<&'static str, PyObject>) {
         let merger = self.py_builder_config.mom_merger.clone();
+        let max_norder = self.py_builder_config.max_norder.into_py(py);
         let split_norder = self.py_builder_config.split_norder.into_py(py);
         let thread_safe = self.py_builder_config.thread_safe.into_py(py);
-        let args = (max_norder, merger);
-        let kwargs = [("split_norder", split_norder), ("thread_safe", thread_safe)];
+        let args = (merger,);
+        let kwargs = [
+            ("max_norder", max_norder),
+            ("split_norder", split_norder),
+            ("thread_safe", thread_safe),
+        ];
         (args, kwargs.into_iter().collect())
     }
 
     fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
-        let vec_bytes =
-            serde_pickle::to_vec(&self, serde_pickle::SerOptions::new()).map_err(|err| {
-                PicklingError::new_err(format!("Cannot pickle MOMBuilder: {}", err))
-            })?;
+        let vec_bytes = serde_pickle::to_vec(&self, serde_pickle::SerOptions::new())
+            .map_err(|err| PicklingError::new_err(format!("Cannot pickle MOMBuilder: {}", err)))?;
         Ok(PyBytes::new(py, &vec_bytes))
     }
 
     fn __setstate__(&mut self, state: &PyBytes) -> PyResult<()> {
         *self = serde_pickle::from_slice(state.as_bytes(), serde_pickle::DeOptions::new())
             .map_err(|err| {
-                UnpicklingError::new_err(format!(
-                    "Cannot unpickle MOMBuilder: {}",
-                    err
-                ))
+                UnpicklingError::new_err(format!("Cannot unpickle MOMBuilder: {}", err))
             })?;
         Ok(())
     }
