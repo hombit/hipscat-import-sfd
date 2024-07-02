@@ -20,6 +20,9 @@ use std::iter::once;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
+pyo3::import_exception!(pickle, PicklingError);
+pyo3::import_exception!(pickle, UnpicklingError);
+
 /// Builds multi-order healpix maps from an array of leaf values
 ///
 /// Parameters
@@ -832,8 +835,44 @@ impl MomBuilder {
     }
 
     // pickle support
+    fn __getnewargs_ex__(&self, py: Python<'_>) -> ((usize, MomMerger), HashMap<&'static str, PyObject>) {
+        let max_norder = self.py_builder_config.max_norder;
+        let merger = self.py_builder_config.mom_merger.clone();
+        let split_norder = self.py_builder_config.split_norder.into_py(py);
+        let thread_safe = self.py_builder_config.thread_safe.into_py(py);
+        let args = (max_norder, merger);
+        let kwargs = [("split_norder", split_norder), ("thread_safe", thread_safe)];
+        (args, kwargs.into_iter().collect())
+    }
+
+    fn __getstate__<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+        let vec_bytes =
+            serde_pickle::to_vec(&self, serde_pickle::SerOptions::new()).map_err(|err| {
+                PicklingError::new_err(format!("Cannot pickle MOMBuilder: {}", err))
+            })?;
+        Ok(PyBytes::new(py, &vec_bytes))
+    }
+
+    fn __setstate__(&mut self, state: &PyBytes) -> PyResult<()> {
+        *self = serde_pickle::from_slice(state.as_bytes(), serde_pickle::DeOptions::new())
+            .map_err(|err| {
+                UnpicklingError::new_err(format!(
+                    "Cannot unpickle MOMBuilder: {}",
+                    err
+                ))
+            })?;
+        Ok(())
+    }
 
     // copy/deepcopy support
+
+    fn __copy__(&self) -> Self {
+        self.clone()
+    }
+
+    fn __deepcopy__(&self, _memo: Py<PyAny>) -> Self {
+        self.clone()
+    }
 }
 
 impl<T, State, Merger> GenericStates<T, State, Merger>
