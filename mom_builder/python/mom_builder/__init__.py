@@ -31,12 +31,12 @@ def gen_mom_from_fn(fn, *, max_norder, split_norder=None, merger, dtype=None):
         A function that takes the max_norder and the indexes of a subtree,
         and returns a MinMaxMeanState.
         The signature is:
-        `fn(order:int, indexes:np.ndarray[uint64]) -> np.ndarray[float]`
+        `fn(order:int, indexes:np.ndarray[uint64]) -> np.ndarray`
         Indexes are the healpix indexes of of the order `order`
         (always `max_norder`). The returned array is the value of the
         function for each of the indexes, it must has the same length as
         `indexes` and always be the same float dtype (so it should not return
-        float32 for some indexes and float64 for others).
+        float32 for some indexes and int64 for others).
     merger : MOMMerger or float
         Merging algorithm to use. If a float is given, min-max-mean states
         are merged if the relative difference between the minimum and maximum
@@ -64,7 +64,8 @@ def gen_mom_from_fn(fn, *, max_norder, split_norder=None, merger, dtype=None):
     if not isinstance(merger, MOMMerger):
         import numpy as np
 
-        dtype = fn(max_norder, np.arange(16, dtype=np.uint64)).dtype
+        if dtype is None:
+            dtype = fn(max_norder, np.arange(16, dtype=np.uint64)).dtype
         merger = MOMMerger("min-max-mean", "rtol", threshold=merger, dtype=dtype)
 
     if split_norder is None:
