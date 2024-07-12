@@ -2,13 +2,7 @@
 
 The module provides multiple interfaces to build healpix MOMs merging
 healpix tiles of some maximum order (healpix tile tree depth) into
-tiles (leaves) of some lower order (top tree depth). The merging is
-done by computing the minimum, maximum and mean values of the tiles.
-A group of four children tiles are merged into a parent tile if
-the relative difffenre between the minimum and maximum values of the
-children tiles is below some user-defined threshold:
-    `(max - min) / norm <= threshold`,
-where `norm` is the maximum absolute value of the minimum and maximum.
+tiles (leaves) of some lower order (top tree depth).
 """
 
 from .mom_builder import *
