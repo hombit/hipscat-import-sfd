@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
 
-from mom_builder import gen_mom_from_fn, mom_from_array, mom_from_batch_it
+from mom_builder import mom_from_array, mom_from_batch_it
+from mom_builder.mom_generator import gen_mom_from_fn
 
 
 def tree_from_gen(g, max_norder):
@@ -24,7 +25,7 @@ def validate_tree_array_lengths(t, name):
 def validate_tree_area(t, name):
     max_norder = len(t) - 1
     desired_area = 12 * 4 ** max_norder
-    actual_area = sum(4**(max_norder - norder) * len(indexes) for norder, (indexes, _) in enumerate(t))
+    actual_area = sum(4 ** (max_norder - norder) * len(indexes) for norder, (indexes, _) in enumerate(t))
     assert actual_area == desired_area, f"{name}"
 
 
@@ -54,7 +55,7 @@ def test_arange(dtype):
 
     tree_from_array = mom_from_array(data, max_norder, threshold=threshold)
 
-    batch_iter = (data[i:i+batch_size] for i in range(0, ntiles, batch_size))
+    batch_iter = (data[i:i + batch_size] for i in range(0, ntiles, batch_size))
     tree_from_it = mom_from_batch_it(batch_iter, max_norder, threshold=threshold)
 
     gen = gen_mom_from_fn(
