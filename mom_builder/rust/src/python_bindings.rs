@@ -51,7 +51,7 @@ fn py_mom_from_array<'py>(
     threshold: f64,
 ) -> PyResult<Vec<(&'py PyArray1<usize>, &'py PyUntypedArray)>> {
     if a.ndim() != 1 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
+        return Err(PyValueError::new_err(
             "Input array must be 1-dimensional",
         ));
     }
@@ -123,7 +123,7 @@ fn py_mom_from_batch_it<'py>(
     let mut py_iter = it.iter()?;
     let first_element = py_iter
         .next()
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Input iterator is empty"))??;
+        .ok_or_else(|| PyValueError::new_err("Input iterator is empty"))??;
 
     if let Ok(array) = first_element.downcast::<PyArray1<f32>>() {
         mom_from_first_and_it(py, array, py_iter, max_norder, threshold as f32)
